@@ -267,7 +267,7 @@
             </toolChain>
           </folderInfo>
           <sourceEntries>
-            <entry excluding="Startup/startup_ch32v30x_D8.S|TinyUSB/test|TinyUSB/examples|TinyUSB/docs|TinyUSB/lib|TinyUSB/hw|TinyUSB/tools|TinyUSB/.PVS-Studio|TinyUSB/.idea|TinyUSB/.github|TinyUSB/.circleci" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+            <entry excluding="Startup/startup_ch32v30x_D8.S|TinyUSB/test|TinyUSB/examples|TinyUSB/docs|TinyUSB/lib|TinyUSB/hw|TinyUSB/tools|TinyUSB/.PVS-Studio|TinyUSB/.idea|TinyUSB/.github|TinyUSB/.circleci|TinyUSB/src/class/audio|TinyUSB/src/class/bth|TinyUSB/src/class/cdc|TinyUSB/src/class/dfu|TinyUSB/src/class/midi|TinyUSB/src/class/msc|TinyUSB/src/class/mtp|TinyUSB/src/class/net|TinyUSB/src/class/usbtmc|TinyUSB/src/class/video|TinyUSB/src/class/vendor|TinyUSB/src/host|TinyUSB/src/typec|TinyUSB/src/portable/analog|TinyUSB/src/portable/bridgetek|TinyUSB/src/portable/chipidea|TinyUSB/src/portable/dialog|TinyUSB/src/portable/ehci|TinyUSB/src/portable/mentor|TinyUSB/src/portable/microchip|TinyUSB/src/portable/mindmotion|TinyUSB/src/portable/nordic|TinyUSB/src/portable/nuvoton|TinyUSB/src/portable/nxp|TinyUSB/src/portable/ohci|TinyUSB/src/portable/raspberrypi|TinyUSB/src/portable/renesas|TinyUSB/src/portable/sony|TinyUSB/src/portable/st|TinyUSB/src/portable/sunxi|TinyUSB/src/portable/synopsys|TinyUSB/src/portable/template|TinyUSB/src/portable/ti|TinyUSB/src/portable/valentyusb" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
           </sourceEntries>
         </configuration>
       </storageModule>
