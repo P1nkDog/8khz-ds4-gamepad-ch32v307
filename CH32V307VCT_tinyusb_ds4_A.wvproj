@@ -52,7 +52,13 @@
 					"${project}/TinyUSB/test",
 					"${project}/TinyUSB/examples",
 					"${project}/TinyUSB/docs",
-					"${project}/TinyUSB"
+					"${project}/TinyUSB/lib",
+					"${project}/TinyUSB/hw",
+					"${project}/TinyUSB/tools",
+					"${project}/TinyUSB/.PVS-Studio",
+					"${project}/TinyUSB/.idea",
+					"${project}/TinyUSB/.github",
+					"${project}/TinyUSB/.circleci"
 				],
 				"optimization": {
 					"level": "size",
@@ -138,7 +144,8 @@
 							"${project}/Debug",
 							"${project}/Core",
 							"${project}/User",
-							"${project}/Peripheral/inc"
+							"${project}/Peripheral/inc",
+							"${project}/TinyUSB/src"
 						],
 						"include_system_paths": [],
 						"include_files": []
