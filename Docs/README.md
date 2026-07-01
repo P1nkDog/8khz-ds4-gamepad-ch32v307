@@ -154,23 +154,20 @@ TinyUSB/src/
 
 `ch32v30x_adc`, `ch32v30x_bkp`, `ch32v30x_can`, `ch32v30x_crc`, `ch32v30x_dac`, `ch32v30x_dbgmcu`, `ch32v30x_dma`, `ch32v30x_dvp`, `ch32v30x_eth`, `ch32v30x_exti`, `ch32v30x_flash`, `ch32v30x_fsmc`, `ch32v30x_gpio`, `ch32v30x_i2c`, `ch32v30x_iwdg`, `ch32v30x_misc`, `ch32v30x_opa`, `ch32v30x_pwr`, `ch32v30x_rcc`, `ch32v30x_rng`, `ch32v30x_rtc`, `ch32v30x_sdio`, `ch32v30x_spi`, `ch32v30x_tim`, `ch32v30x_usart`, `ch32v30x_wwdg`
 
-### TinyUSB 库 (约70个 .c)
+### TinyUSB 库 (9 个 .c, 已精简)
 
-所有 TinyUSB 设备/主机/类驱动均被编译, 包括:
+`.cproject` 已排除不需要的源文件, 仅编译以下 9 个 TinyUSB 文件 (通过 `--gc-sections` 链接时自动去除未引用的函数):
 
 **核心:**
-- `tusb.c`, `tusb_fifo.c`, `usbd.c`, `usbd_control.c`, `usbh.c`, `hub.c`, `usbc.c`
+- `tusb.c`, `tusb_fifo.c`, `usbd.c`, `usbd_control.c`
 
 **设备类:**
-- `audio_device`, `bth_device`, `cdc_device`, `cdc_host`, `cdc_rndis_host`, `dfu_device`, `dfu_rt_device`, `hid_device`, `hid_host`, `midi_device`, `midi_host`, `msc_device`, `msc_host`, `mtp_device`, `ecm_rndis_device`, `ncm_device`, `usbtmc_device`, `vendor_device`, `vendor_host`, `video_device`
+- `hid_device.c`, `hid_host.c`
 
-**平台移植 (WCH 关键驱动):**
+**平台移植 (WCH 驱动):**
 - `dcd_ch32_usbfs.c` — CH32 USB Full-Speed 设备控制器驱动
 - `dcd_ch32_usbhs.c` — CH32 USB High-Speed 设备控制器驱动
 - `hcd_ch32_usbfs.c` — CH32 USB FS 主机控制器驱动
-
-**其他平台移植 (均被编译但不会被链接使用):**
-- STM32, NXP, Raspberry Pi RP2040, Nordic nRF5x, Microchip SAM/PIC, Renesas, Sony, Dialog, Synopsys DWC2, EHCI, OHCI 等
 
 ---
 

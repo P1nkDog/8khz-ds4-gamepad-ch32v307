@@ -6,12 +6,12 @@
 
 ### 当前状态
 
-项目目前处于 **模板阶段**：基础工程已搭建（CH32V307 + TinyUSB），系统时钟 144MHz，USART 调试输出正常，但 `main.c` 仍是 WCH 模板代码，无任何 USB 或手柄功能。编译输出约 110KB ELF，TinyUSB 编译了全部 70+ 源文件（实际只需 7 个）。
+项目目前处于 **模板阶段**：基础工程已搭建（CH32V307 + TinyUSB），系统时钟 144MHz，USART 调试输出正常，但 `main.c` 仍是 WCH 模板代码，无任何 USB 或手柄功能。TinyUSB 已精简为 9 个源文件（`.cproject` 已排除不需要的目录）。
 
 ### 总体路线
 
 ```
-阶段 0 ──── 工程瘦身与基础准备
+阶段 0 ──── 工程瘦身与基础准备 ✅
   │
   ▼
 阶段 1 ──── DS4 手柄核心功能移植
@@ -34,172 +34,25 @@
 
 ---
 
-### 阶段 0：工程瘦身与基础准备
+### 阶段 0：工程瘦身与基础准备 ✅ 已完成
 
 **目标**：清理不需要的编译产物，为后续开发腾出 Flash 空间，建立正确的工程结构。
 
-#### 0.1 当前问题分析
+#### 0.1 TinyUSB 精简状态
 
-**TinyUSB 编译膨胀**：当前项目编译了 TinyUSB 的全部源文件，包括所有 USB 设备类、主机栈和 30+ 个平台移植驱动。
+`.cproject` 已配置排除不需要的源文件目录。当前实际编译的 TinyUSB 文件仅 **9 个**：
 
-| 对比项 | 当前项目 | 参考项目 | 差异 |
-|--------|----------|----------|------|
-| TinyUSB .o 文件数 | **74 个** | **7 个** | 多编译了 67 个无用文件 |
-| TinyUSB .o 目录大小 | **2.2MB** | **668KB** | 多出 1.5MB 目标文件 |
-| ELF 文件大小 | **108KB** | **308KB** | 当前项目反而更小（因为没有手柄功能） |
-| USB 速度配置 | `OPT_MODE_DEFAULT_SPEED` | `OPT_MODE_HIGH_SPEED` | 效果相同，见下方说明 |
-| `bsp/` 目录 | **缺失** | 完整 | 需要创建 |
-| `CFG_TUSB_MCU` 预定义 | **已定义** | 通过编译器定义 | 已在 tusb_config.h 中设置 |
+| 目录 | 文件 | 说明 |
+|------|------|------|
+| `TinyUSB/src/` | `tusb.c` | TinyUSB 核心 |
+| `TinyUSB/src/common/` | `tusb_fifo.c` | FIFO 队列 |
+| `TinyUSB/src/device/` | `usbd.c`, `usbd_control.c` | USB 设备核心 |
+| `TinyUSB/src/class/hid/` | `hid_device.c`, `hid_host.c` | HID 设备类 + 主机类 |
+| `TinyUSB/src/portable/wch/` | `dcd_ch32_usbfs.c`, `dcd_ch32_usbhs.c`, `hcd_ch32_usbfs.c` | WCH USB 驱动 |
 
-**当前项目编译的 74 个 TinyUSB 文件清单**：
+> **说明**：`hid_host.c` 和 `hcd_ch32_usbfs.c` 虽然被编译但未被引用，链接时 `--gc-sections` 会自动去除。
 
-不需要的设备类 (20 个 .o)：
-```
-class/audio/audio_device.o        ← 不需要
-class/bth/bth_device.o            ← 不需要
-class/cdc/cdc_device.o            ← 不需要
-class/cdc/cdc_host.o              ← 不需要
-class/cdc/cdc_rndis_host.o        ← 不需要
-class/dfu/dfu_device.o            ← 不需要
-class/dfu/dfu_rt_device.o         ← 不需要
-class/hid/hid_host.o              ← 不需要 (只需要 hid_device)
-class/midi/midi_device.o          ← 不需要
-class/midi/midi_host.o            ← 不需要
-class/msc/msc_device.o            ← 不需要
-class/msc/msc_host.o              ← 不需要
-class/mtp/mtp_device.o            ← 不需要
-class/net/ecm_rndis_device.o      ← 不需要
-class/net/ncm_device.o            ← 不需要
-class/usbtmc/usbtmc_device.o      ← 不需要
-class/vendor/vendor_device.o      ← 不需要
-class/vendor/vendor_host.o        ← 不需要
-class/video/video_device.o        ← 不需要
-```
-
-不需要的主机栈 (2 个 .o)：
-```
-host/hub.o                        ← 不需要 (只用设备模式)
-host/usbh.o                       ← 不需要
-```
-
-不需要的平台移植驱动 (41 个 .o)：
-```
-portable/analog/max3421/hcd_max3421.o       ← 不需要
-portable/bridgetek/ft9xx/dcd_ft9xx.o        ← 不需要
-portable/chipidea/ci_fs/dcd_ci_fs.o         ← 不需要
-portable/chipidea/ci_hs/dcd_ci_hs.o         ← 不需要
-portable/chipidea/ci_hs/hcd_ci_hs.o         ← 不需要
-portable/dialog/da146xx/dcd_da146xx.o       ← 不需要
-portable/ehci/ehci.o                        ← 不需要
-portable/mentor/musb/dcd_musb.o             ← 不需要
-portable/mentor/musb/hcd_musb.o             ← 不需要
-portable/microchip/pic/dcd_pic.o            ← 不需要
-portable/microchip/pic32mz/dcd_pic32mz.o    ← 不需要
-portable/microchip/samd/dcd_samd.o          ← 不需要
-portable/microchip/samd/hcd_samd.o          ← 不需要
-portable/microchip/samg/dcd_samg.o          ← 不需要
-portable/microchip/samx7x/dcd_samx7x.o      ← 不需要
-portable/mindmotion/mm32/dcd_mm32f327x_otg.o ← 不需要
-portable/nordic/nrf5x/dcd_nrf5x.o           ← 不需要
-portable/nuvoton/nuc120/dcd_nuc120.o        ← 不需要
-portable/nuvoton/nuc121/dcd_nuc121.o        ← 不需要
-portable/nuvoton/nuc505/dcd_nuc505.o        ← 不需要
-portable/nxp/khci/dcd_khci.o                ← 不需要
-portable/nxp/khci/hcd_khci.o                ← 不需要
-portable/nxp/lpc17_40/dcd_lpc17_40.o        ← 不需要
-portable/nxp/lpc_ip3511/dcd_lpc_ip3511.o    ← 不需要
-portable/ohci/ohci.o                        ← 不需要
-portable/raspberrypi/pio_usb/dcd_pio_usb.o  ← 不需要
-portable/raspberrypi/pio_usb/hcd_pio_usb.o  ← 不需要
-portable/raspberrypi/rp2040/dcd_rp2040.o    ← 不需要
-portable/raspberrypi/rp2040/hcd_rp2040.o    ← 不需要
-portable/raspberrypi/rp2040/rp2040_usb.o    ← 不需要
-portable/renesas/rusb2/dcd_rusb2.o          ← 不需要
-portable/renesas/rusb2/hcd_rusb2.o          ← 不需要
-portable/renesas/rusb2/rusb2_common.o       ← 不需要
-portable/sony/cxd56/dcd_cxd56.o             ← 不需要
-portable/st/stm32_fsdev/dcd_stm32_fsdev.o   ← 不需要
-portable/st/typec/typec_stm32.o             ← 不需要
-portable/sunxi/dcd_sunxi_musb.o             ← 不需要
-portable/synopsys/dwc2/dcd_dwc2.o           ← 不需要
-portable/synopsys/dwc2/dwc2_common.o        ← 不需要
-portable/synopsys/dwc2/hcd_dwc2.o           ← 不需要
-portable/template/dcd_template.o            ← 不需要
-portable/template/hcd_template.o            ← 不需要
-portable/ti/msp430x5xx/dcd_msp430x5xx.o     ← 不需要
-portable/valentyusb/eptri/dcd_eptri.o       ← 不需要
-```
-
-不需要的其他模块 (4 个 .o)：
-```
-typec/usbc.o                      ← 不需要
-portable/wch/hcd_ch32_usbfs.o     ← 不需要 (只用设备模式，不用主机模式)
-```
-
-**只需要保留的 7 个文件**：
-```
-src/tusb.o                                    ← TinyUSB 核心
-src/common/tusb_fifo.o                        ← FIFO 队列
-src/device/usbd.o                             ← USB 设备核心
-src/device/usbd_control.o                     ← USB 控制传输
-src/class/hid/hid_device.o                    ← HID 设备类
-src/portable/wch/dcd_ch32_usbfs.o             ← WCH USB FS 驱动
-src/portable/wch/dcd_ch32_usbhs.o             ← WCH USB HS 驱动
-```
-
-#### 0.2 .cproject 修改方法
-
-MounRiver Studio 的 `.cproject` 使用 `excluding` 属性排除不需要的源文件目录。当前排除列表在第 270 行：
-
-```
-<entry excluding="Startup/startup_ch32v30x_D8.S|TinyUSB/test|TinyUSB/examples|TinyUSB/docs|TinyUSB/lib|TinyUSB/hw|TinyUSB/tools|..."
-```
-
-需要在 `excluding` 属性中追加以下排除项（用 `|` 分隔）：
-
-```
-需要排除的 TinyUSB 子目录:
-TinyUSB/src/class/audio
-TinyUSB/src/class/bth
-TinyUSB/src/class/cdc
-TinyUSB/src/class/dfu
-TinyUSB/src/class/hid/hid_host.c        ← 注意：只排除 host，保留 hid_device.c
-TinyUSB/src/class/midi
-TinyUSB/src/class/msc
-TinyUSB/src/class/mtp
-TinyUSB/src/class/net
-TinyUSB/src/class/usbtmc
-TinyUSB/src/class/vendor
-TinyUSB/src/class/video
-TinyUSB/src/host
-TinyUSB/src/portable/analog
-TinyUSB/src/portable/bridgetek
-TinyUSB/src/portable/chipidea
-TinyUSB/src/portable/dialog
-TinyUSB/src/portable/ehci
-TinyUSB/src/portable/mentor
-TinyUSB/src/portable/microchip
-TinyUSB/src/portable/mindmotion
-TinyUSB/src/portable/nordic
-TinyUSB/src/portable/nuvoton
-TinyUSB/src/portable/nxp
-TinyUSB/src/portable/ohci
-TinyUSB/src/portable/raspberrypi
-TinyUSB/src/portable/renesas
-TinyUSB/src/portable/sony
-TinyUSB/src/portable/st
-TinyUSB/src/portable/sunxi
-TinyUSB/src/portable/synopsys
-TinyUSB/src/portable/template
-TinyUSB/src/portable/ti
-TinyUSB/src/portable/valentyusb
-TinyUSB/src/typec
-```
-
-> **注意**：`.cproject` 是 XML 文件，可以用文本编辑器直接修改。MounRiver Studio 重新打开项目后会自动加载。
-> 如果不想手动编辑 `.cproject`，也可以在 MounRiver Studio 中右键项目 → Properties → C/C++ Build → Settings → Source，手动添加排除路径。
-
-#### 0.3 tusb_config.h 确认
+#### 0.2 tusb_config.h 确认
 
 当前 `tusb_config.h` 配置已正确，**无需修改**：
 
@@ -218,7 +71,7 @@ TinyUSB/src/typec
 
 **结论**：`OPT_MODE_DEFAULT_SPEED` (0x0000) 表示"使用 MCU 支持的最高速度"，对 CH32V307 就是 High-Speed 480Mbps。参考项目显式写 `OPT_MODE_HIGH_SPEED` 只是更明确，效果完全相同。
 
-#### 0.4 .cproject 添加 Include 路径
+#### 0.3 .cproject 添加 Include 路径
 
 在 `.cproject` 的 C Compiler → Include paths 中添加：
 ```
@@ -227,12 +80,7 @@ ${workspace_loc:/${ProjName}/bsp}
 
 > `CFG_TUSB_MCU` 已在 `tusb_config.h` 中通过 `#define` 定义，不需要在 `.cproject` 中重复添加。
 
-在 `.cproject` 的 C Compiler → Include paths 中添加：
-```
-${workspace_loc:/${ProjName}/bsp}
-```
-
-#### 0.5 创建 bsp/ 目录结构
+#### 0.4 创建 bsp/ 目录结构
 
 需要新建的文件（从参考项目复制）：
 ```
@@ -245,16 +93,15 @@ bsp/
 └── joystick.c           # ADC 摇杆驱动
 ```
 
-#### 0.6 验证标准
+#### 0.5 验证标准
 
-- 编译无错误无警告
-- TinyUSB 只编译 7-9 个 .o 文件（从 74 个大幅减少）
-- obj/TinyUSB 目录从 2.2MB 下降到 ~668KB
-- `tusb_config.h` 中 `BOARD_TUD_MAX_SPEED` 为 `OPT_MODE_DEFAULT_SPEED`（对 CH32V307 即 High-Speed）
-- `CFG_TUSB_MCU=OPT_MCU_CH32V307` 已在 `tusb_config.h` 中定义
-- `bsp/` 目录已创建并可被 Include 路径找到
+- [x] 编译无错误无警告
+- [x] TinyUSB 只编译 9 个 .o 文件（`.cproject` 已排除不需要的目录）
+- [x] `tusb_config.h` 中 `BOARD_TUD_MAX_SPEED` 为 `OPT_MODE_DEFAULT_SPEED`（对 CH32V307 即 High-Speed）
+- [x] `CFG_TUSB_MCU=OPT_MCU_CH32V307` 已在 `tusb_config.h` 中定义
+- [ ] `bsp/` 目录已创建并可被 Include 路径找到（待阶段 1 完成）
 
-**预计工作量**：1 小时
+**剩余工作量**：~30 分钟（创建 bsp/ 目录、添加 Include 路径）
 
 ---
 
@@ -474,8 +321,8 @@ bsp/
 ### 时间线总览
 
 ```
-第 1 天    阶段 0 工程瘦身 ──────────────────────┐
-第 1-2 天  阶段 1 DS4 核心移植 ──────────────────┤ 基础可用
+第 1 天    阶段 0 工程瘦身 ────────────────────── ✅ 已完成
+第 1-2 天  阶段 1 DS4 核心移植 ──────────────────┐ 基础可用
 第 2-3 天  阶段 2 配置文件系统 ──────────────────┤
 第 3-5 天  阶段 3 输入驱动与映射 ────────────────┘
 第 5-7 天  阶段 4 PC 配置工具 ──────────────────── 用户体验
@@ -1469,19 +1316,20 @@ uint8_t apply_sensitivity(uint8_t value, uint8_t mode)
 
 ## 11. 编译优化建议
 
-### 11.1 精简 TinyUSB 编译
+### 11.1 精简 TinyUSB 编译 ✅ 已完成
 
-参考项目只编译了 7 个 TinyUSB 文件 (对比当前项目的 70+)。建议修改 `.cproject`：
+`.cproject` 已配置排除不需要的源文件目录，当前仅编译 9 个 TinyUSB 文件：
 
-**只保留的 TinyUSB 源文件目录**：
 ```
 TinyUSB/src/tusb.c
 TinyUSB/src/common/tusb_fifo.c
 TinyUSB/src/device/usbd.c
 TinyUSB/src/device/usbd_control.c
 TinyUSB/src/class/hid/hid_device.c
+TinyUSB/src/class/hid/hid_host.c               ← 编译但 --gc-sections 会去除
 TinyUSB/src/portable/wch/dcd_ch32_usbfs.c
 TinyUSB/src/portable/wch/dcd_ch32_usbhs.c
+TinyUSB/src/portable/wch/hcd_ch32_usbfs.c      ← 编译但 --gc-sections 会去除
 ```
 
 ### 11.2 链接优化
