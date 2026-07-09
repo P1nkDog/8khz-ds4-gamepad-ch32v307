@@ -10,6 +10,7 @@
 #define _DS4_DRIVER_H_
 
 #include "ds4_descriptors.h"
+#include "tusb.h"
 
 
 //--------------------------------------------------------------------+

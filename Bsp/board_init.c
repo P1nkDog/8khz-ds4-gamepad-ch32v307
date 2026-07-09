@@ -52,6 +52,12 @@ void board_init(void) {                                    //板级总初始化函数
   /* Disable interrupts during init */
   __disable_irq();                                         //关闭全局中断
 
+	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);         //NVIC优先级分组
+	SystemCoreClockUpdate();                                //更新系统时钟
+  Delay_Init();                                           //延时函数初始化
+
+
+
 #if CFG_TUSB_OS == OPT_OS_NONE
   SysTick_Config(SystemCoreClock / 1000);
 #endif

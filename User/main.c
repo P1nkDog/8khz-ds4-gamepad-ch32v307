@@ -1,24 +1,17 @@
 /********************************** (C) COPYRIGHT *******************************
 * File Name          : main.c
-* Author             : WCH
+* Author             : P1nkDog
 * Version            : V1.0.0
-* Date               : 2021/06/06
+* Date               : 2026/07/09
 * Description        : Main program body.
-*********************************************************************************
-* Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
-* Attention: This software (modified or not) and binary are used for 
-* microcontroller manufactured by Nanjing Qinheng Microelectronics.
-*******************************************************************************/
+********************************************************************************/
 
-/*
- *@Note
- USART Print debugging routine:
- USART1_Tx(PA9).
- This example demonstrates using USART1(PA9) as a print debug port output.
 
-*/
 
 #include "debug.h"
+#include "board_api.h"
+#include "ds4_driver.h"
+#include "input.h"
 
 
 /* Global typedef */
@@ -37,17 +30,29 @@
  */
 int main(void)
 {
-	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
-	SystemCoreClockUpdate();
-	Delay_Init();
-	USART_Printf_Init(115200);	
+	board_init();
+	JoystickData joy;
+
 	printf("SystemClk:%d\r\n",SystemCoreClock);
 	printf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
 	printf("This is printf example\r\n");
+	input_init();
+	   // 打印启动信息
+    printf("Input Test Start\r\n");
+
+
 
 	while(1)
     {
+		// 读取摇杆
+        input_read_joystick(&joy);
 
+        // 打印摇杆数据
+        printf("LX:%04d LY:%04d RX:%04d RY:%04d\r\n",
+               joy.lx, joy.ly, joy.rx, joy.ry);
+
+        // 延时
+        board_delay(100);
 	}
 }
 

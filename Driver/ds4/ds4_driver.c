@@ -6,6 +6,8 @@
 * Description        : ds4Çý¶¯ÎÄ¼þ
 *********************************************************************************/
 
+#include <string.h>
+
 #include "board_api.h"
 #include "tusb.h"
 #include "ds4_descriptors.h"
