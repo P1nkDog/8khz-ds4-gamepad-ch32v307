@@ -11,7 +11,7 @@
 #include "debug.h"
 #include "board_api.h"
 #include "ds4_driver.h"
-#include "input.h"
+#include "gamepad.h"
 
 
 /* Global typedef */
@@ -31,28 +31,20 @@
 int main(void)
 {
 	board_init();
-	JoystickData joy;
-
+    gamepad_init();
+    tud_init(BOARD_TUD_RHPORT);
 	printf("SystemClk:%d\r\n",SystemCoreClock);
 	printf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
 	printf("This is printf example\r\n");
-	input_init();
-	   // 打印启动信息
-    printf("Input Test Start\r\n");
 
 
 
 	while(1)
     {
-		// 读取摇杆
-        input_read_joystick(&joy);
-
-        // 打印摇杆数据
-        printf("LX:%04d LY:%04d RX:%04d RY:%04d\r\n",
-               joy.lx, joy.ly, joy.rx, joy.ry);
-
-        // 延时
-        board_delay(100);
+        tud_task();
+        gamepad_process();
+        ds4_process(gamepad_get_state());
+        board_delay(1);
 	}
 }
 

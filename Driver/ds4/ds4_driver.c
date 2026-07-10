@@ -25,22 +25,42 @@ void ds4_driver_init(void) {
 //--------------------------------------------------------------------+
 void ds4_send_report(PS4Report *report) {
     if (tud_hid_ready()) {
-        tud_hid_report(0x01, report, sizeof(PS4Report));
+        tud_hid_report(0, report, sizeof(PS4Report));
     }
 }
 
 //--------------------------------------------------------------------+
 // 主循环处理
 //--------------------------------------------------------------------+
-void ds4_process(void) {
-    // TODO: 读取硬件，更新报告，发送
-    // static uint8_t counter = 0;
-    // static PS4Report report;
-    // memset(&report, 0, sizeof(PS4Report));
-    // report.reportID = 0x01;
-    // // 读取按键、摇杆...
-    // report.reportCounter = counter++ & 0x3F;
-    // ds4_send_report(&report);
+void ds4_process(const GamepadState *state) {
+
+    PS4Report report;
+    memset(&report, 0, sizeof(PS4Report));
+    report.reportID = 0x01;
+
+    report.leftStickX = state -> lx >> 4;
+    report.leftStickY = state -> ly >> 4;
+    report.rightStickX = state -> rx >> 4;
+    report.rightStickY = state -> ry >> 4;
+
+    report.dpad = state->dpad;
+
+    report.buttonWest     = state->buttonWest;
+    report.buttonSouth    = state->buttonSouth;
+    report.buttonEast     = state->buttonEast;
+    report.buttonNorth    = state->buttonNorth;
+    report.buttonL1       = state->buttonL1;
+    report.buttonR1       = state->buttonR1;
+    report.buttonL2       = state->buttonL2;
+    report.buttonR2       = state->buttonR2;
+    report.buttonSelect   = state->buttonSelect;
+    report.buttonStart    = state->buttonStart;
+    report.buttonL3       = state->buttonL3;
+    report.buttonR3       = state->buttonR3;
+    report.buttonHome     = state->buttonHome;
+    report.buttonTouchpad = state->buttonTouchpad;
+
+    ds4_send_report(&report);
 }
 
 

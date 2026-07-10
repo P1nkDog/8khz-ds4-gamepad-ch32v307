@@ -11,6 +11,7 @@
 
 #include "ds4_descriptors.h"
 #include "tusb.h"
+#include "gamepad.h"
 
 
 //--------------------------------------------------------------------+
@@ -51,7 +52,7 @@ void ds4_driver_init(void);
 // 主循环处理（参考 PS4Driver::process）
 //--------------------------------------------------------------------+
 
-void ds4_process(void);
+void ds4_process(const GamepadState *state);
 
 //--------------------------------------------------------------------+
 // TinyUSB 描述符回调

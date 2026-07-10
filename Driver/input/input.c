@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/09
-* Description        : 手柄按键ADC读取
+* Description        : 手柄GPIO按键和摇杆ADC读取
 *********************************************************************************/
 
 #include "input.h"
@@ -80,14 +80,14 @@ static void button_gpio_init(void){
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE );
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE );
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOE, ENABLE );
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE );
 
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 |
                                   GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
     GPIO_Init(GPIOE, &GPIO_InitStructure);   
 
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 |
-                                  GPIO_Pin_6 | GPIO_Pin_7;
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
 
@@ -95,6 +95,10 @@ static void button_gpio_init(void){
                                   GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
     GPIO_Init(GPIOD, &GPIO_InitStructure);
+
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_12 | GPIO_Pin_10;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
+    GPIO_Init(GPIOC, &GPIO_InitStructure);  
 }
 
 //--------------------------------------------------------------------+
@@ -112,8 +116,6 @@ static uint8_t gpio_read_pin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin){
 // 公共接口
 //--------------------------------------------------------------------+
 
-
-
 //初始化输入硬件（GPIO，ADC）
 void input_init(void){
     adc_function_init();
@@ -130,43 +132,34 @@ void input_read_joystick(JoystickData *data){
 }
 
 //读取标准按键
-void input_read_buttons(ButtonData *data){
-    data->dpad = INPUT_HAT_NOTHING;
-    data->buttons = 0;
-    data->l2 = 0;
-    data->r2 = 0;
+void input_read_buttons(uint32_t *buttons){
 
-    // 十字键 (PB3-PB6)
-    if(gpio_read_pin(GPIOB, GPIO_Pin_3) == 0) data->dpad = INPUT_HAT_UP;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_4) == 0) data->dpad = INPUT_HAT_DOWN;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_5) == 0) data->dpad = INPUT_HAT_LEFT;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_6) == 0) data->dpad = INPUT_HAT_RIGHT;
+    *buttons = 0; 
 
-    // 扳机 L2/R2 (PB7, PD1)
-    if(gpio_read_pin(GPIOB, GPIO_Pin_7) == 0) data->l2 = 255;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_1) == 0) data->r2 = 255;
+    // 按键 (PE0-PE6)
+    if(gpio_read_pin(GPIOE, GPIO_Pin_6) == 0) *buttons |= INPUT_MASK_PE6;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_5) == 0) *buttons |= INPUT_MASK_PE5;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_4) == 0) *buttons |= INPUT_MASK_PE4;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_3) == 0) *buttons |= INPUT_MASK_PE3;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_2) == 0) *buttons |= INPUT_MASK_PE2;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_1) == 0) *buttons |= INPUT_MASK_PE1;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_0) == 0) *buttons |= INPUT_MASK_PE0;
 
-    // 功能按键 (PE0-PE6)
-    if(gpio_read_pin(GPIOE, GPIO_Pin_0) == 0) data->buttons |= INPUT_MASK_A;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_1) == 0) data->buttons |= INPUT_MASK_B;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_2) == 0) data->buttons |= INPUT_MASK_X;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_3) == 0) data->buttons |= INPUT_MASK_Y;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_4) == 0) data->buttons |= INPUT_MASK_L1;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_5) == 0) data->buttons |= INPUT_MASK_R1;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_6) == 0) data->buttons |= INPUT_MASK_SELECT;
+    // 按键 (PB3-PB5)
+    if(gpio_read_pin(GPIOB, GPIO_Pin_5) == 0) *buttons |= INPUT_MASK_PB5;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_4) == 0) *buttons |= INPUT_MASK_PB4;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_3) == 0) *buttons |= INPUT_MASK_PB3;
 
-    // 功能按键 (PD2-PD6)
-    if(gpio_read_pin(GPIOD, GPIO_Pin_2) == 0) data->buttons |= INPUT_MASK_START;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_3) == 0) data->buttons |= INPUT_MASK_L3;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_4) == 0) data->buttons |= INPUT_MASK_R3;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_5) == 0) data->buttons |= INPUT_MASK_PS;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_6) == 0) data->buttons |= INPUT_MASK_TP;
-}
+    // 按键 (PD1-PD7)
+    if(gpio_read_pin(GPIOD, GPIO_Pin_7) == 0) *buttons |= INPUT_MASK_PD7;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_6) == 0) *buttons |= INPUT_MASK_PD6;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_5) == 0) *buttons |= INPUT_MASK_PD5;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_4) == 0) *buttons |= INPUT_MASK_PD4;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_3) == 0) *buttons |= INPUT_MASK_PD3;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_2) == 0) *buttons |= INPUT_MASK_PD2;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_1) == 0) *buttons |= INPUT_MASK_PD1;
 
-//读取拓展按键
-void input_read_extrabuttons(ExtraButtonData *data){
-    data->extra = 0;
-
-    // 扩展按键 (PD7)
-    if(gpio_read_pin(GPIOD, GPIO_Pin_7) == 0) data->extra |= INPUT_MASK_A1;
+    // 按键 (PC12,PC10)
+    if(gpio_read_pin(GPIOC, GPIO_Pin_12) == 0) *buttons |= INPUT_MASK_PC12;
+    if(gpio_read_pin(GPIOC, GPIO_Pin_10) == 0) *buttons |= INPUT_MASK_PC10;
 }
