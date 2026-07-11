@@ -53,20 +53,20 @@ void gamepad_process(){
     state.rx = 4095 - joy .rx;
     state.ry = joy .ry;
 
-    state.buttonWest = (btn & INPUT_MASK_PE2) ? 1 : 0;
-    state.buttonSouth = (btn & INPUT_MASK_PE1) ? 1 : 0;
-    state.buttonEast = (btn & INPUT_MASK_PE0) ? 1 : 0;
-    state.buttonNorth = (btn & INPUT_MASK_PC12) ? 1 : 0;
-    state.buttonL1 = (btn & INPUT_MASK_PC10) ? 1 : 0;
-    state.buttonR1 = (btn & INPUT_MASK_PB5) ? 1 : 0;
-    state.buttonL2 = (btn & INPUT_MASK_PB4) ? 1 : 0;
-    state.buttonR2 = (btn & INPUT_MASK_PB3) ? 1 : 0;
-    state.buttonSelect = (btn & INPUT_MASK_PD7) ? 1 : 0;
-    state.buttonStart = (btn & INPUT_MASK_PD6) ? 1 : 0;
-    state.buttonL3 = (btn & INPUT_MASK_PD5) ? 1 : 0;
-    state.buttonR3 = (btn & INPUT_MASK_PD4) ? 1 : 0;
-    state.buttonHome = (btn & INPUT_MASK_PD3) ? 1 : 0;
-    state.buttonTouchpad = (btn & INPUT_MASK_PD2) ? 1 : 0;
+    state.buttonWest         = (btn & INPUT_MASK_PE2) ? 1 : 0;
+    state.buttonSouth        = (btn & INPUT_MASK_PE1) ? 1 : 0;
+    state.buttonEast         = (btn & INPUT_MASK_PE0) ? 1 : 0;
+    state.buttonNorth        = (btn & INPUT_MASK_PC12) ? 1 : 0;
+    state.buttonL1           = (btn & INPUT_MASK_PC10) ? 1 : 0;
+    state.buttonR1           = (btn & INPUT_MASK_PB5) ? 1 : 0;
+    state.buttonL2           = (btn & INPUT_MASK_PB4) ? 1 : 0;
+    state.buttonR2           = (btn & INPUT_MASK_PB3) ? 1 : 0;
+    state.buttonSelect       = (btn & INPUT_MASK_PD7) ? 1 : 0;
+    state.buttonStart        = (btn & INPUT_MASK_PD6) ? 1 : 0;
+    state.buttonL3           = (btn & INPUT_MASK_PD5) ? 1 : 0;
+    state.buttonR3           = (btn & INPUT_MASK_PD4) ? 1 : 0;
+    state.buttonHome         = (btn & INPUT_MASK_PD3) ? 1 : 0;
+    state.buttonTouchpad     = (btn & INPUT_MASK_PD2) ? 1 : 0;
 
     state.dpad = gamepad_dpad_map(btn);
 }
