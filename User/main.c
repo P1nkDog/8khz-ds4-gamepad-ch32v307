@@ -44,7 +44,6 @@ int main(void)
         tud_task();
         gamepad_process();
         ds4_process(gamepad_get_state());
-        board_delay(1);
 	}
 }
 

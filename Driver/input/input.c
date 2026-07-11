@@ -54,7 +54,7 @@ static void adc_function_init(void)
 // ADC读取原始值
 //--------------------------------------------------------------------+
 static uint16_t adc_read_raw(uint8_t channel){
-    ADC_RegularChannelConfig(ADC1,channel,1,ADC_SampleTime_239Cycles5);
+    ADC_RegularChannelConfig(ADC1,channel,1,ADC_SampleTime_71Cycles5);
     ADC_SoftwareStartConvCmd(ADC1,ENABLE);
     while (!ADC_GetFlagStatus(ADC1,ADC_FLAG_EOC));
     return ADC_GetConversionValue(ADC1);
