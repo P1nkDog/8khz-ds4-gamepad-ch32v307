@@ -60,6 +60,8 @@ void ds4_process(const GamepadState *state) {
     report.buttonHome     = state->buttonHome;
     report.buttonTouchpad = state->buttonTouchpad;
 
+    report.miscData[20] = 0x1B;
+
     ds4_send_report(&report);
 }
 

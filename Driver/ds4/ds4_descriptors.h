@@ -436,7 +436,7 @@ static const uint8_t ps4_device_descriptor[] =
 	ENDPOINT0_SIZE,					  // bMaxPacketSize0
 	LSB(DS4_VENDOR_ID), MSB(DS4_VENDOR_ID),	  // idVendor
 	LSB(DS4_PRODUCT_ID), MSB(DS4_PRODUCT_ID), // idProduct
-	0x01, 0x00,						  // bcdDevice
+	0x00, 0x01,						  // bcdDevice
 	1,								  // iManufacturer
 	2,								  // iProduct
 	0,								  // iSerialNumber
