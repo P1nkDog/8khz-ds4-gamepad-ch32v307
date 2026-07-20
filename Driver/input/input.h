@@ -6,8 +6,8 @@
 * Description        : 手柄GPIO按键和摇杆ADC读取接口定义
 *********************************************************************************/
 
-#ifndef _INPUT_H_
-#define _INPUT_H_
+#ifndef INPUT_H
+#define INPUT_H
 
 #include <stdint.h>
 
@@ -64,4 +64,4 @@ void input_read_joystick(JoystickData *data);
 void input_read_buttons(uint32_t *buttons);
 
 
-#endif //_INPUT_H_
+#endif //INPUT_H

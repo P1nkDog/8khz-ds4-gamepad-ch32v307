@@ -6,8 +6,8 @@
 * Description        : 摇杆ADC数据处理头文件
 *********************************************************************************/
 
-#ifndef _JOYSTICK_H_
-#define _JOYSTICK_H_
+#ifndef JOYSTICK_H
+#define JOYSTICK_H
 
 #define deadzonepersent 5
 
@@ -37,7 +37,7 @@ typedef struct{
 void joystick_init(void);
 
 //摇杆轴校准
-void joystick_set_
+void joystick_set_calibration();
 
 
 
@@ -49,5 +49,5 @@ void joystick_set_
 
 
 
-#endif //_JOYSTICK_H_
+#endif //JOYSTICK_H
 

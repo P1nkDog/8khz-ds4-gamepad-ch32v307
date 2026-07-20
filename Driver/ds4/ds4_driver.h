@@ -6,18 +6,14 @@
 * Description        : ds4驱动接口头文件
 *********************************************************************************/
 
-#ifndef _DS4_DRIVER_H_
-#define _DS4_DRIVER_H_
+#ifndef DS4_DRIVER_H
+#define DS4_DRIVER_H
 
 #include "ds4_descriptors.h"
 #include "tusb.h"
 #include "gamepad.h"
 
-
-//--------------------------------------------------------------------+
 // PS4 Feature Report IDs（参考 GP2040-CE PS4AuthReport）
-//--------------------------------------------------------------------+
-
 typedef enum
 {
     PS4_GET_CALIBRATION      = 0x02,    // PS4 Controller Calibration
@@ -42,30 +38,19 @@ typedef enum
 //    256 byte - ps4 signature
 //    24 byte  - zero padding
 
-//--------------------------------------------------------------------+
-// 初始化
-//--------------------------------------------------------------------+
 
+// 初始化
 void ds4_driver_init(void);
 
-//--------------------------------------------------------------------+
 // 主循环处理（参考 PS4Driver::process）
-//--------------------------------------------------------------------+
-
 void ds4_process(const GamepadState *state);
 
-//--------------------------------------------------------------------+
 // TinyUSB 描述符回调
-//--------------------------------------------------------------------+
-
 uint8_t const *tud_descriptor_device_cb(void);
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index);
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid); 
 
-//--------------------------------------------------------------------+
 // TinyUSB HID 回调
-//--------------------------------------------------------------------+
-
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance);
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
                                 hid_report_type_t report_type,
@@ -74,14 +59,11 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                             hid_report_type_t report_type,
                             uint8_t const* buffer, uint16_t bufsize);
 
-//--------------------------------------------------------------------+
 // 手柄数据发送
-//--------------------------------------------------------------------+
-
 void ds4_send_report(PS4Report *report);
 
 
 
 
 
-#endif // _DS4_DRIVER_H_
+#endif // DS4_DRIVER_H

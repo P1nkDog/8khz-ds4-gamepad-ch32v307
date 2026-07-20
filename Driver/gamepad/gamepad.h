@@ -6,8 +6,8 @@
 * Description        : GPIO按键映射和摇杆ADC数据处理接口定义
 *********************************************************************************/
 
-#ifndef _GAMEPAD_H_
-#define _GAMEPAD_H_
+#ifndef GAMEPAD_H
+#define GAMEPAD_H
 
 #include <stdint.h>
 
@@ -69,4 +69,4 @@ const GamepadState* gamepad_get_state(void);
 
 
 
-#endif //_GAMEPAD_H_
+#endif //GAMEPAD_H

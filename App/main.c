@@ -12,6 +12,7 @@
 #include "board_api.h"
 #include "ds4_driver.h"
 #include "gamepad.h"
+#include "config.h"
 
 
 /* Global typedef */
@@ -31,6 +32,36 @@
 int main(void)
 {
 	board_init();
+    config_init();
+        printf("\r\n=== Config Debug ===\r\n");
+    printf("Groups: %d\r\n", config_get_count());
+
+    for (int i = 0; i < config_get_count(); i++) {
+        const ConfigDesc *d = config_get_desc_by_index(i);
+        printf("  [%d] id=%d ver=%d size=%d name=%s\r\n",
+            i, d->id, d->version, d->size, d->name);
+    }
+
+    const JoystickCalibConfig *calib = (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
+    printf("Joystick Calib:\r\n");
+    for (int i = 0; i < 4; i++) {
+        printf("  [%d] min=%d center=%d max=%d\r\n",
+            i, calib->calib[i].min, calib->calib[i].center, calib->calib[i].max);
+    }
+
+    const GamepadSettings *s = (const GamepadSettings *)config_get(CONFIG_ID_GAMEPAD_SETTINGS);
+    printf("Gamepad Settings:\r\n");
+    printf("  deadzone=%d\r\n", s->deadzone);
+
+    // ===== ≤‚ ‘±£¥Ê =====
+    GamepadSettings *s_mut = config_get_mutable(CONFIG_ID_GAMEPAD_SETTINGS);
+    s_mut->deadzone = 100;
+    config_mark_dirty(CONFIG_ID_GAMEPAD_SETTINGS);
+    bool ok = config_save();
+    printf("Save: %s\r\n", ok ? "OK" : "FAIL");
+    printf("deadzone now: %d\r\n", s_mut->deadzone);
+    // ===== ≤‚ ‘Ω· ¯ =====
+
     gamepad_init();
     tud_init(BOARD_TUD_RHPORT);
 	printf("SystemClk:%d\r\n",SystemCoreClock);

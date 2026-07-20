@@ -28,9 +28,23 @@ CH32V307 的 288K Flash 地址范围：`0x00000000 ~ 0x00047FFF`
 0x00047FFF └──────────────┘
 ```
 
-写入策略：先擦除备用扇区并写入新数据，验证通过后再擦除活动扇区。两个扇区交替使用，断电安全。
+### 为什么用两个扇区？
+
+Flash 有一个特性：**擦除后全变 0xFF，写入只能 1→0，不能 0→1**。
+
+如果只有一个扇区，保存时必须：擦除 → 写入。如果在擦除之后、写入之前断电了，数据就全丢了。
+
+两个扇区交替使用：
+1. 当前数据在扇区 A
+2. 先把新数据写到扇区 B（扇区 A 的数据还在）
+3. 验证扇区 B 写入成功
+4. 擦除扇区 A（为下次保存做准备）
+
+如果步骤 2 或 3 中间断电，扇区 A 的数据还在，下次启动时能正常加载。
 
 ## TLV 存储格式
+
+TLV = **T**ype（类型） + **L**ength（长度） + **V**alue（数据）
 
 ```
 ┌─────────────────────┐
@@ -40,63 +54,86 @@ CH32V307 的 288K Flash 地址范围：`0x00000000 ~ 0x00047FFF`
 ├─────────────────────┤
 │ Record 2 ...        │
 ├─────────────────────┤
-│ Footer (2B)         │  terminator = 0x0000
+│ Footer (2B)         │  terminator = 0x0000（标记记录结束）
 ├─────────────────────┤
-│ CRC16 (2B)          │  CRC16-CCITT（header 到 footer 的校验）
+│ CRC16 (2B)          │  校验码（header 到 footer 的所有数据）
 └─────────────────────┘
 ```
+
+**为什么要用 TLV？** 因为可以存多个配置组，每个组独立版本号。加载时按 Type 查找，版本不匹配就用默认值，不影响其他组。
 
 ---
 
 ## 第 1 步：`config_hal.h` — Flash 硬件抽象层接口
 
 ```c
-#pragma once
+#ifndef CONFIG_HAL_H
+#define CONFIG_HAL_H
+
 #include <stdint.h>
 #include <stdbool.h>
 
-#define CONFIG_FLASH_SECTOR_SIZE    0x1000  // 4KB
+// CH32V307 Flash 扇区大小 4KB
+#define CONFIG_FLASH_SECTOR_SIZE    0x1000
+
+// 配置存储区地址（Flash 末尾两个扇区）
 #define CONFIG_FLASH_SECTOR_A_ADDR  0x00046000
 #define CONFIG_FLASH_SECTOR_B_ADDR  0x00047000
 
+// 擦除一个扇区（4KB），addr 必须是扇区起始地址
 bool config_hal_erase_sector(uint32_t sector_addr);
+
+// 向 Flash 写入数据，addr 必须 2 字节对齐
 bool config_hal_write(uint32_t addr, const uint8_t *data, uint32_t len);
+
+// 从 Flash 读取数据（Flash 是内存映射的，直接读指针即可）
 void config_hal_read(uint32_t addr, uint8_t *buf, uint32_t len);
+
+#endif /* CONFIG_HAL_H */
 ```
 
 ## 第 2 步：`config_hal.c` — Flash 底层实现
 
+CH32V307 提供两种 Flash 编程方式：
+- **标准模式**：`FLASH_ProgramHalfWord()`，每次写 2 字节，慢
+- **快速模式**：`FLASH_ROM_WRITE()`，每次写 256 字节，快
+
+这里用快速模式，参考 WCH 官方示例 `FLASH_Program`。
+
 ```c
 #include "config_hal.h"
 #include "ch32v30x_flash.h"
+#include <string.h>
 
 bool config_hal_erase_sector(uint32_t sector_addr) {
-    FLASH_Unlock();
-    FLASH_Status status = FLASH_ErasePage(sector_addr);
-    FLASH_Lock();
+    // FLASH_ROM_ERASE(起始地址, 长度)
+    // 快速擦除，一次可以擦除多个扇区
+    FLASH_Status status = FLASH_ROM_ERASE(sector_addr, CONFIG_FLASH_SECTOR_SIZE);
     return (status == FLASH_COMPLETE);
 }
 
 bool config_hal_write(uint32_t addr, const uint8_t *data, uint32_t len) {
-    FLASH_Unlock();
-    uint32_t i = 0;
-    while (i + 1 < len) {
-        uint16_t halfword = data[i] | (data[i + 1] << 8);
-        if (FLASH_ProgramHalfWord(addr + i, halfword) != FLASH_COMPLETE) {
-            FLASH_Lock();
-            return false;
-        }
-        i += 2;
-    }
-    // 处理奇数字节（补 0xFF）
-    if (i < len) {
-        FLASH_ProgramHalfWord(addr + i, data[i] | (0xFF << 8));
-    }
-    FLASH_Lock();
-    return true;
+    // FLASH_ROM_WRITE 要求：
+    //   1. 数据长度必须是 4 的倍数
+    //   2. 数据缓冲区必须 4 字节对齐（uint32_t 数组）
+    //   3. 地址必须 4 字节对齐
+
+    // 将长度向上取整到 4 的倍数
+    uint32_t aligned_len = (len + 3) & ~3;
+
+    // 用 uint32_t 数组作为缓冲区，自动满足 4 字节对齐
+    // CONFIG_FLASH_SECTOR_SIZE / 4 = 1024 个 uint32_t
+    static uint32_t write_buf[CONFIG_FLASH_SECTOR_SIZE / 4];
+    memset(write_buf, 0xFF, aligned_len);  // 未使用的部分填 0xFF
+    memcpy(write_buf, data, len);          // 复制实际数据
+
+    // FLASH_ROM_WRITE(地址, uint32_t指针, 长度)
+    FLASH_Status status = FLASH_ROM_WRITE(addr, write_buf, aligned_len);
+    return (status == FLASH_COMPLETE);
 }
 
 void config_hal_read(uint32_t addr, uint8_t *buf, uint32_t len) {
+    // Flash 是内存映射的，直接用指针读
     const uint8_t *src = (const uint8_t *)addr;
     for (uint32_t i = 0; i < len; i++) {
         buf[i] = src[i];
@@ -104,15 +141,32 @@ void config_hal_read(uint32_t addr, uint8_t *buf, uint32_t len) {
 }
 ```
 
-**注意事项**：
-- CH32V307 写 Flash 期间 CPU 无法从 Flash 取指，写入前需关中断（`__disable_irq()`）
-- 如果遇到 HardFault，需将 Flash 操作代码放到 RAM 执行（`__attribute__((section(".ramfunc")))`）
-- 写入地址必须 2 字节对齐
+### 重要注意事项
+
+**1. 写 Flash 时 CPU 不能从 Flash 取指令**
+
+CH32V307 写 Flash 期间，CPU 无法同时从 Flash 读取代码。如果写 Flash 时有中断触发，CPU 要去执行中断处理函数（在 Flash 里），就会卡死。
+
+解决方案：写 Flash 前关中断。`__disable_irq()` 和 `__enable_irq()` 定义在 `Core/core_riscv.h` 中，确认你的项目包含了这个头文件。
+
+**2. 如果系统时钟超过 120MHz**
+
+根据 WCH 官方示例的注释，如果系统时钟 > 120MHz，写 Flash 前需要将 HCLK 分频到 60MHz 以下。你的项目默认 144MHz，但 `system_ch32v30x.c` 中已经配置了 Flash 等待周期，一般不需要额外处理。如果遇到写入失败，检查 `FLASH_CTLR` 寄存器的 `SCKMOD` 位。
+
+**3. `static` 缓冲区**
+
+`write_buf` 用 `static` 声明，这样它在 RAM 中有固定地址，不会占用栈空间（4KB 栈上分配可能导致栈溢出）。
 
 ## 第 3 步：`config_crc.h` — CRC16-CCITT
 
+CRC（循环冗余校验）用于检测数据是否损坏。这里用的是 CRC16-CCITT 算法，多项式 0x1021。
+
+查表法：预先计算好 256 种可能的输入对应的 CRC 值，运行时直接查表，比逐位计算快得多。
+
 ```c
-#pragma once
+#ifndef CONFIG_CRC_H
+#define CONFIG_CRC_H
+
 #include <stdint.h>
 
 static const uint16_t crc16_table[256] = {
@@ -150,12 +204,19 @@ static const uint16_t crc16_table[256] = {
     0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0,
 };
 
+// 计算 CRC16-CCITT
+// crc: 初始值传 0xFFFF
+// data: 数据指针
+// len: 数据长度
+// 返回值: 计算后的 CRC
 static inline uint16_t crc16_update(uint16_t crc, const uint8_t *data, uint32_t len) {
     for (uint32_t i = 0; i < len; i++) {
         crc = (crc << 8) ^ crc16_table[((crc >> 8) ^ data[i]) & 0xFF];
     }
     return crc;
 }
+
+#endif /* CONFIG_CRC_H */
 ```
 
 ---
@@ -163,97 +224,137 @@ static inline uint16_t crc16_update(uint16_t crc, const uint8_t *data, uint32_t 
 ## 第 4 步：`config.h` — 核心头文件
 
 ```c
-#pragma once
+#ifndef CONFIG_H
+#define CONFIG_H
+
 #include <stdint.h>
 #include <stdbool.h>
 
 // ============================================================
 // 配置组编号
 // ============================================================
+// 每个配置组有唯一的编号，存储时用这个编号标识是哪个组
+// 新增配置组时在这里加一个编号即可
+
 enum {
-    CONFIG_ID_JOYSTICK_CALIB   = 1,
-    CONFIG_ID_GAMEPAD_SETTINGS = 2,
+    CONFIG_ID_JOYSTICK_CALIB   = 1,   // 摇杆校准数据
+    CONFIG_ID_GAMEPAD_SETTINGS = 2,   // 手柄设置
 };
+
+// ============================================================
+// 引用 joystick.h 中的结构体
+// ============================================================
+#include "joystick.h"  // JoystickCalibration, JoystickOutput
 
 // ============================================================
 // 配置组数据结构
 // ============================================================
 
-// 摇杆校准数据（24 字节）
+// 摇杆校准数据（复用 joystick.h 中的 JoystickCalibration）
+// 4 个轴，每轴有 min/center/max 三个校准值
+// 总大小：4 × 6 字节 = 24 字节
 typedef struct {
-    uint16_t min[4];
-    uint16_t max[4];
-    uint16_t center[4];
-} joystick_calib_t;
+    JoystickCalibration calib[4];  // [0]=LX [1]=LY [2]=RX [3]=RY
+} JoystickCalibConfig;
 
 // 手柄设置（4 字节）
 typedef struct {
-    uint16_t deadzone;
-    uint8_t  led_mode;
-    uint8_t  reserved;
-} gamepad_settings_t;
+    uint16_t deadzone;    // 摇杆死区（0~2047），居中时小于这个值视为 0
+    uint8_t  led_mode;    // LED 模式（0=关, 1=常亮, 2=呼吸...）
+    uint8_t  reserved;    // 保留，用于 4 字节对齐
+} GamepadSettings;
 
 // ============================================================
-// 配置组描述符
+// 配置组描述符（内部使用，描述一个配置组的元信息）
 // ============================================================
 
 typedef struct {
-    uint16_t    id;
-    uint8_t     version;
-    uint8_t     _pad;
-    uint16_t    size;
-    void       *ram;
-    const void *default_data;
-    const char *name;
-} config_desc_t;
+    uint16_t    id;            // 配置组编号（CONFIG_ID_xxx）
+    uint8_t     version;       // 版本号（修改结构体时递增，旧数据会被丢弃）
+    uint8_t     _pad;          // 对齐填充
+    uint16_t    size;          // 数据大小（字节）
+    void       *ram;           // RAM 中的数据地址
+    const void *default_data;  // 默认值地址
+    const char *name;          // 名称（用于调试）
+} ConfigDesc;
 
-#define CONFIG_MAX_GROUPS 16
+#define CONFIG_MAX_GROUPS 16  // 最多支持 16 个配置组
 
 // ============================================================
-// TLV 格式
+// TLV 数据格式（存储在 Flash 中的二进制格式）
 // ============================================================
 
-#define CONFIG_MAGIC  0xCF07
+#define CONFIG_MAGIC  0xCF07  // 魔数，用于识别 Flash 中是否有有效配置
 
+// 文件头（4 字节）
 typedef struct {
-    uint16_t magic;
-    uint8_t  version;
-    uint8_t  count;
-} __attribute__((packed)) config_header_t;
+    uint16_t magic;     // 必须等于 CONFIG_MAGIC
+    uint8_t  version;   // 存储格式版本（目前为 1）
+    uint8_t  count;     // 配置组数量
+} __attribute__((packed)) ConfigHeader;
 
+// 每个配置组的记录头（6 字节）
 typedef struct {
-    uint16_t type;
-    uint16_t length;
-    uint8_t  version;
-    uint8_t  flags;
-    uint8_t  data[];
-} __attribute__((packed)) config_record_t;
+    uint16_t type;      // 配置组编号
+    uint16_t length;    // 这条记录的总长度（含头部）
+    uint8_t  version;   // 配置组版本号
+    uint8_t  flags;     // 标志位（保留）
+    uint8_t  data[];    // 柔性数组，实际数据紧跟其后
+} __attribute__((packed)) ConfigRecord;
 
+// 文件尾（2 字节）
 typedef struct {
-    uint16_t terminator;
-} __attribute__((packed)) config_footer_t;
+    uint16_t terminator;  // 0x0000，标记记录结束
+} __attribute__((packed)) ConfigFooter;
+
+// 注：`__attribute__((packed))` 告诉编译器不要在结构体成员之间插入填充字节
+// 这样结构体在内存中的布局和我们定义的完全一致，可以直接写入 Flash
 
 // ============================================================
 // API
 // ============================================================
 
-void        config_init(void);
-bool        config_save(void);
-bool        config_reset(uint16_t id);
-void        config_reset_all(void);
+// 初始化：注册所有配置组 + 从 Flash 加载
+// 必须在其他模块初始化之前调用
+void config_init(void);
+
+// 保存所有被修改的配置到 Flash
+// 只有调用过 config_mark_dirty() 的配置组才会被写入
+// 返回 true 表示成功
+bool config_save(void);
+
+// 重置某个配置组为默认值
+bool config_reset(uint16_t id);
+
+// 重置所有配置为默认值
+void config_reset_all(void);
+
+// 获取配置组的只读指针
+// 用法：const JoystickCalibConfig *calib = config_get(CONFIG_ID_JOYSTICK_CALIB);
 const void* config_get(uint16_t id);
-void*       config_get_mutable(uint16_t id);
-void        config_mark_dirty(uint16_t id);
-uint8_t     config_get_count(void);
-const config_desc_t* config_get_desc(uint16_t id);
-const config_desc_t* config_get_desc_by_index(uint8_t index);
+
+// 获取配置组的可写指针
+// 修改后必须调用 config_mark_dirty() 标记已修改
+void* config_get_mutable(uint16_t id);
+
+// 标记某个配置组已修改（下次 config_save() 时会写入 Flash）
+void config_mark_dirty(uint16_t id);
+
+// 获取已注册的配置组数量
+uint8_t config_get_count(void);
+
+// 获取配置组描述符（用于调试）
+const ConfigDesc* config_get_desc(uint16_t id);
+const ConfigDesc* config_get_desc_by_index(uint8_t index);
 
 // ============================================================
-// 配置组实例
+// 配置组实例（全局变量，其他文件可直接 extern 使用）
 // ============================================================
 
-extern joystick_calib_t    g_joystick_calib;
-extern gamepad_settings_t  g_gamepad_settings;
+extern JoystickCalibConfig    g_joystickCalib;
+extern GamepadSettings  g_gamepadSettings;
+
+#endif /* CONFIG_H */
 ```
 
 ---
@@ -269,40 +370,53 @@ extern gamepad_settings_t  g_gamepad_settings;
 // ============================================================
 // 配置组 RAM 实例
 // ============================================================
+// 这些变量在 RAM 中，断电丢失
+// config_init() 时会从 Flash 加载数据覆盖，或用默认值初始化
 
-joystick_calib_t    g_joystick_calib;
-gamepad_settings_t  g_gamepad_settings;
+JoystickCalibConfig    g_joystickCalib;
+GamepadSettings  g_gamepadSettings;
 
 // ============================================================
-// 默认值
+// 默认值（存在 Flash 的 .rodata 段，不占 RAM）
 // ============================================================
 
-static const joystick_calib_t joystick_calib_default = {
-    .min    = {0, 0, 0, 0},
-    .max    = {4095, 4095, 4095, 4095},
-    .center = {2048, 2048, 2048, 2048},
+static const JoystickCalibConfig joystickCalibDefault = {
+    .calib = {
+        [0] = { .min = 0,    .center = 2048, .max = 4095 },  // LX
+        [1] = { .min = 0,    .center = 2048, .max = 4095 },  // LY
+        [2] = { .min = 0,    .center = 2048, .max = 4095 },  // RX
+        [3] = { .min = 0,    .center = 2048, .max = 4095 },  // RY
+    },
 };
 
-static const gamepad_settings_t gamepad_settings_default = {
+static const GamepadSettings gamepadSettingsDefault = {
     .deadzone = 50,
     .led_mode = 0,
 };
 
 // ============================================================
-// 注册表
+// 注册表（记录所有已注册的配置组）
 // ============================================================
 
 static struct {
-    uint8_t       count;
-    config_desc_t descs[CONFIG_MAX_GROUPS];
-    bool          dirty[CONFIG_MAX_GROUPS];
-    uint32_t      active_sector;
+    uint8_t       count;                         // 已注册数量
+    ConfigDesc descs[CONFIG_MAX_GROUPS];      // 描述符数组
+    bool          dirty[CONFIG_MAX_GROUPS];      // 脏标记（true = 需要保存）
+    uint32_t      active_sector;                 // 当前活动扇区地址
 } registry;
 
+// 注册一个配置组
+// id: 配置组编号
+// version: 版本号（修改结构体时递增）
+// size: 数据大小
+// ram: RAM 中的变量地址
+// def: 默认值地址
+// name: 名称（调试用）
 static void config_register(uint16_t id, uint8_t version, uint16_t size,
                             void *ram, const void *def, const char *name) {
     if (registry.count >= CONFIG_MAX_GROUPS) return;
-    config_desc_t *d = &registry.descs[registry.count];
+
+    ConfigDesc *d = &registry.descs[registry.count];
     d->id = id;
     d->version = version;
     d->size = size;
@@ -310,7 +424,10 @@ static void config_register(uint16_t id, uint8_t version, uint16_t size,
     d->default_data = def;
     d->name = name;
     registry.dirty[registry.count] = false;
+
+    // 用默认值初始化 RAM
     memcpy(ram, def, size);
+
     registry.count++;
 }
 
@@ -318,7 +435,7 @@ static void config_register(uint16_t id, uint8_t version, uint16_t size,
 // 查找
 // ============================================================
 
-static config_desc_t* find_desc(uint16_t id) {
+static ConfigDesc* find_desc(uint16_t id) {
     for (int i = 0; i < registry.count; i++) {
         if (registry.descs[i].id == id) return &registry.descs[i];
     }
@@ -337,12 +454,12 @@ static int find_index(uint16_t id) {
 // ============================================================
 
 const void* config_get(uint16_t id) {
-    config_desc_t *d = find_desc(id);
+    ConfigDesc *d = find_desc(id);
     return d ? d->ram : NULL;
 }
 
 void* config_get_mutable(uint16_t id) {
-    config_desc_t *d = find_desc(id);
+    ConfigDesc *d = find_desc(id);
     return d ? d->ram : NULL;
 }
 
@@ -355,16 +472,16 @@ uint8_t config_get_count(void) {
     return registry.count;
 }
 
-const config_desc_t* config_get_desc(uint16_t id) {
+const ConfigDesc* config_get_desc(uint16_t id) {
     return find_desc(id);
 }
 
-const config_desc_t* config_get_desc_by_index(uint8_t index) {
+const ConfigDesc* config_get_desc_by_index(uint8_t index) {
     return (index < registry.count) ? &registry.descs[index] : NULL;
 }
 
 bool config_reset(uint16_t id) {
-    config_desc_t *d = find_desc(id);
+    ConfigDesc *d = find_desc(id);
     if (!d) return false;
     memcpy(d->ram, d->default_data, d->size);
     registry.dirty[find_index(id)] = true;
@@ -384,36 +501,53 @@ void config_reset_all(void) {
 // Flash 加载
 // ============================================================
 
+// 验证一个扇区的数据是否有效
+// 检查：magic 正确 + CRC 正确
 static bool validate_sector(uint32_t addr) {
     uint8_t buf[CONFIG_FLASH_SECTOR_SIZE];
     config_hal_read(addr, buf, sizeof(buf));
-    config_header_t *h = (config_header_t *)buf;
+
+    ConfigHeader *h = (ConfigHeader *)buf;
     if (h->magic != CONFIG_MAGIC) return false;
+
+    // CRC 校验：对整个扇区（除最后 2 字节 CRC 本身）计算 CRC
+    // 存储的 CRC 放在最后 2 字节
     uint16_t stored = buf[CONFIG_FLASH_SECTOR_SIZE - 2]
                     | (buf[CONFIG_FLASH_SECTOR_SIZE - 1] << 8);
     uint16_t calc = crc16_update(0xFFFF, buf, CONFIG_FLASH_SECTOR_SIZE - 2);
     return (stored == calc);
 }
 
+// 从指定扇区加载配置数据
 static void load_sector(uint32_t addr) {
     uint8_t buf[CONFIG_FLASH_SECTOR_SIZE];
     config_hal_read(addr, buf, sizeof(buf));
-    config_header_t *h = (config_header_t *)buf;
+
+    ConfigHeader *h = (ConfigHeader *)buf;
     if (h->magic != CONFIG_MAGIC) return;
 
-    uint32_t offset = sizeof(config_header_t);
-    while (offset + sizeof(config_record_t) <= CONFIG_FLASH_SECTOR_SIZE - 4) {
-        config_record_t *rec = (config_record_t *)(buf + offset);
+    // 遍历所有 TLV 记录
+    uint32_t offset = sizeof(ConfigHeader);
+    while (offset + sizeof(ConfigRecord) <= CONFIG_FLASH_SECTOR_SIZE - 4) {
+        ConfigRecord *rec = (ConfigRecord *)(buf + offset);
+
+        // 遇到终止符（type=0x0000）停止
         if (rec->type == 0x0000) break;
-        if (rec->length < sizeof(config_record_t) ||
+
+        // 记录长度异常，停止
+        if (rec->length < sizeof(ConfigRecord) ||
             offset + rec->length > CONFIG_FLASH_SECTOR_SIZE - 4) break;
 
-        config_desc_t *d = find_desc(rec->type);
+        // 在注册表中查找匹配的配置组
+        ConfigDesc *d = find_desc(rec->type);
         if (d && rec->version == d->version) {
-            uint16_t data_len = rec->length - sizeof(config_record_t);
+            // 版本匹配，恢复数据
+            uint16_t data_len = rec->length - sizeof(ConfigRecord);
             uint16_t take = data_len < d->size ? data_len : d->size;
             memcpy(d->ram, rec->data, take);
         }
+        // 版本不匹配或未注册 → 保持默认值
+
         offset += rec->length;
     }
 }
@@ -423,56 +557,74 @@ static void load_sector(uint32_t addr) {
 // ============================================================
 
 bool config_save(void) {
-    // 1. 检查脏数据
+    // 1. 检查是否有脏数据
     bool has_dirty = false;
     for (int i = 0; i < registry.count; i++) {
         if (registry.dirty[i]) { has_dirty = true; break; }
     }
-    if (!has_dirty) return true;
+    if (!has_dirty) return true;  // 没有变化，不需要写入
 
-    // 2. 选择目标扇区
+    // 2. 选择目标扇区（当前活动扇区的另一个）
     uint32_t target = (registry.active_sector == CONFIG_FLASH_SECTOR_A_ADDR)
                     ? CONFIG_FLASH_SECTOR_B_ADDR
                     : CONFIG_FLASH_SECTOR_A_ADDR;
 
-    // 3. 构建 TLV 缓冲区
+    // 3. 在 RAM 中构建完整的 TLV 数据
+    //    这样可以一次性写入 Flash，减少写入次数
+    //    代价是占用 4KB RAM（CH32V307 有 32KB RAM，够用）
     uint8_t buf[CONFIG_FLASH_SECTOR_SIZE];
-    memset(buf, 0xFF, sizeof(buf));
+    memset(buf, 0xFF, sizeof(buf));  // Flash 擦除后是 0xFF，预填充
     uint32_t offset = 0;
 
-    config_header_t header = {
-        .magic = CONFIG_MAGIC, .version = 1, .count = registry.count
+    // 写 Header
+    ConfigHeader header = {
+        .magic = CONFIG_MAGIC,
+        .version = 1,
+        .count = registry.count,
     };
     memcpy(buf + offset, &header, sizeof(header));
     offset += sizeof(header);
 
+    // 写每个配置组的 Record
     for (int i = 0; i < registry.count; i++) {
-        config_desc_t *d = &registry.descs[i];
-        config_record_t rec = {
+        ConfigDesc *d = &registry.descs[i];
+        ConfigRecord rec = {
             .type = d->id,
-            .length = sizeof(config_record_t) + d->size,
+            .length = sizeof(ConfigRecord) + d->size,
             .version = d->version,
             .flags = 0,
         };
+
+        // 空间检查
         if (offset + rec.length > CONFIG_FLASH_SECTOR_SIZE - 4) break;
+
         memcpy(buf + offset, &rec, sizeof(rec));
         offset += sizeof(rec);
         memcpy(buf + offset, d->ram, d->size);
         offset += d->size;
     }
 
-    config_footer_t footer = { .terminator = 0 };
+    // 写 Footer
+    ConfigFooter footer = { .terminator = 0 };
     memcpy(buf + offset, &footer, sizeof(footer));
     offset += sizeof(footer);
 
+    // 写 CRC（放在数据之后）
     uint16_t crc = crc16_update(0xFFFF, buf, offset);
     buf[offset]     = crc & 0xFF;
     buf[offset + 1] = crc >> 8;
 
     // 4. 写入 Flash
+    //    关中断：写 Flash 期间 CPU 不能从 Flash 取指令
     __disable_irq();
-    if (!config_hal_erase_sector(target)) { __enable_irq(); return false; }
-    if (!config_hal_write(target, buf, sizeof(buf))) { __enable_irq(); return false; }
+    if (!config_hal_erase_sector(target)) {
+        __enable_irq();
+        return false;
+    }
+    if (!config_hal_write(target, buf, sizeof(buf))) {
+        __enable_irq();
+        return false;
+    }
     __enable_irq();
 
     // 5. 回读验证
@@ -480,7 +632,10 @@ bool config_save(void) {
 
     // 6. 更新状态
     registry.active_sector = target;
-    for (int i = 0; i < registry.count; i++) registry.dirty[i] = false;
+    for (int i = 0; i < registry.count; i++) {
+        registry.dirty[i] = false;
+    }
+
     return true;
 }
 
@@ -491,24 +646,29 @@ bool config_save(void) {
 void config_init(void) {
     registry.count = 0;
 
-    config_register(CONFIG_ID_JOYSTICK_CALIB, 1, sizeof(joystick_calib_t),
-                    &g_joystick_calib, &joystick_calib_default, "joystick_calib");
+    // 注册所有配置组
+    // 参数：编号, 版本, 大小, RAM地址, 默认值地址, 名称
+    config_register(CONFIG_ID_JOYSTICK_CALIB, 1, sizeof(JoystickCalibConfig),
+                    &g_joystickCalib, &joystickCalibDefault, "joystick_calib");
 
-    config_register(CONFIG_ID_GAMEPAD_SETTINGS, 1, sizeof(gamepad_settings_t),
-                    &g_gamepad_settings, &gamepad_settings_default, "gamepad_settings");
+    config_register(CONFIG_ID_GAMEPAD_SETTINGS, 1, sizeof(GamepadSettings),
+                    &g_gamepadSettings, &gamepadSettingsDefault, "gamepad_settings");
 
-    // 检测活动扇区并加载
+    // 从 Flash 加载（如果有的话）
     bool a_ok = validate_sector(CONFIG_FLASH_SECTOR_A_ADDR);
     bool b_ok = validate_sector(CONFIG_FLASH_SECTOR_B_ADDR);
 
     if (a_ok) {
+        // 扇区 A 有效，从 A 加载
         registry.active_sector = CONFIG_FLASH_SECTOR_A_ADDR;
         load_sector(CONFIG_FLASH_SECTOR_A_ADDR);
     } else if (b_ok) {
+        // 扇区 B 有效，从 B 加载
         registry.active_sector = CONFIG_FLASH_SECTOR_B_ADDR;
         load_sector(CONFIG_FLASH_SECTOR_B_ADDR);
     } else {
-        // 两个扇区都无效，使用默认值
+        // 两个扇区都无效（首次启动），使用默认值
+        // 活动扇区默认指向 A
         registry.active_sector = CONFIG_FLASH_SECTOR_A_ADDR;
     }
 }
@@ -518,17 +678,20 @@ void config_init(void) {
 
 ## 第 6 步：修改 `main.c`
 
+在 `main.c` 中添加配置初始化：
+
 ```c
-#include "config/config.h"
+#include "config/config.h"    // 添加头文件
 
 int main(void)
 {
     board_init();
-    config_init();         // 加载配置（必须在其他模块初始化之前）
+    config_init();             // 添加这一行，必须在 gamepad_init() 之前
     gamepad_init();
     tud_init(BOARD_TUD_RHPORT);
 
     printf("SystemClk:%d\r\n", SystemCoreClock);
+    printf("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
     while(1)
     {
@@ -539,23 +702,31 @@ int main(void)
 }
 ```
 
+**为什么要在 `gamepad_init()` 之前？** 因为 `gamepad_init()` 可能需要用到配置数据（比如死区设置）。
+
 ---
 
 ## 使用示例
 
-### 读取配置
+### 读取配置（只读）
 
 ```c
-const joystick_calib_t *calib = (const joystick_calib_t *)config_get(CONFIG_ID_JOYSTICK_CALIB);
-uint16_t lx_min = calib->min[0];
+const JoystickCalibConfig *calib = (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
+uint16_t lx_min = calib->calib[0].min;      // LX 轴最小值
+uint16_t ry_center = calib->calib[3].center; // RY 轴中心值
 ```
 
 ### 修改配置
 
 ```c
-joystick_calib_t *calib = (joystick_calib_t *)config_get_mutable(CONFIG_ID_JOYSTICK_CALIB);
-calib->min[0] = 100;
-calib->max[0] = 4000;
+// 1. 获取可写指针
+JoystickCalibConfig *calib = (JoystickCalibConfig *)config_get_mutable(CONFIG_ID_JOYSTICK_CALIB);
+
+// 2. 修改数据
+calib->calib[0].min = 100;     // LX 轴最小值
+calib->calib[0].max = 4000;    // LX 轴最大值
+
+// 3. 标记已修改（重要！不标记的话 config_save() 不会保存这个组）
 config_mark_dirty(CONFIG_ID_JOYSTICK_CALIB);
 ```
 
@@ -576,33 +747,91 @@ config_reset_all();                       // 重置全部
 
 ## 添加新配置组
 
-3 步：
+只需 3 步：
 
-1. **config.h** — 添加结构体和枚举：
-```c
-enum { ... CONFIG_ID_LED_CONFIG = 3 };
-typedef struct { uint8_t brightness, r, g, b; } led_config_t;
-extern led_config_t g_led_config;
-```
+### 1. config.h — 添加结构体和枚举
 
-2. **config.c** — 添加实例、默认值、注册：
 ```c
-led_config_t g_led_config;
-static const led_config_t led_config_default = {
-    .brightness = 128, .r = 0, .g = 0, .b = 255,
+// 在 enum 中添加编号
+enum {
+    CONFIG_ID_JOYSTICK_CALIB   = 1,
+    CONFIG_ID_GAMEPAD_SETTINGS = 2,
+    CONFIG_ID_LED_CONFIG       = 3,    // 新增
 };
-// 在 config_init() 中：
-config_register(CONFIG_ID_LED_CONFIG, 1, sizeof(led_config_t),
-                &g_led_config, &led_config_default, "led_config");
+
+// 添加结构体
+typedef struct {
+    uint8_t brightness;   // 亮度 0~255
+    uint8_t r;            // 红色 0~255
+    uint8_t g;            // 绿色 0~255
+    uint8_t b;            // 蓝色 0~255
+} LedConfig;
+
+// 声明外部变量
+extern LedConfig g_ledConfig;
 ```
 
-3. **完成** — 无需修改其他文件，config_save() 会自动包含新配置组。
+### 2. config.c — 添加实例、默认值、注册
+
+```c
+// 添加变量
+LedConfig g_ledConfig;
+
+// 添加默认值
+static const LedConfig ledConfigDefault = {
+    .brightness = 128,
+    .r = 0, .g = 0, .b = 255,
+};
+
+// 在 config_init() 中添加注册
+config_register(CONFIG_ID_LED_CONFIG, 1, sizeof(LedConfig),
+                &g_ledConfig, &ledConfigDefault, "led_config");
+```
+
+### 3. 完成
+
+无需修改其他文件，`config_save()` 会自动包含新配置组。
 
 ---
 
 ## 调试步骤
 
-1. **测试 Flash 擦写** — 单独调用 `config_hal_erase_sector()` 和 `config_hal_write()`，确认读写正确
-2. **测试配置存储** — 修改配置 → `config_save()` → 断电重启 → 检查值是否保持
-3. **测试版本不匹配** — 修改配置组版本号，确认旧数据被丢弃、使用默认值
-4. **测试双扇区交替** — 连续保存两次，确认两个扇区交替使用
+### 第 1 步：测试 Flash 擦写
+
+在 main.c 中单独测试，确认 Flash 读写正常：
+
+```c
+#include "config/config_hal.h"
+
+// 测试写入和读取
+uint8_t test_write[] = {0x01, 0x02, 0x03, 0x04};
+uint8_t test_read[4];
+
+config_hal_erase_sector(CONFIG_FLASH_SECTOR_A_ADDR);
+config_hal_write(CONFIG_FLASH_SECTOR_A_ADDR, test_write, 4);
+config_hal_read(CONFIG_FLASH_SECTOR_A_ADDR, test_read, 4);
+
+// 检查 test_read 是否等于 {0x01, 0x02, 0x03, 0x04}
+printf("Flash test: %02X %02X %02X %02X\r\n",
+       test_read[0], test_read[1], test_read[2], test_read[3]);
+```
+
+### 第 2 步：测试配置存储
+
+```c
+// 修改配置
+GamepadSettings *s = config_get_mutable(CONFIG_ID_GAMEPAD_SETTINGS);
+s->deadzone = 100;
+config_mark_dirty(CONFIG_ID_GAMEPAD_SETTINGS);
+config_save();
+
+// 重启后检查 deadzone 是否为 100
+```
+
+### 第 3 步：测试版本不匹配
+
+修改配置组的版本号（从 1 改为 2），重新编译烧录。确认旧配置被丢弃，使用默认值。
+
+### 第 4 步：测试双扇区交替
+
+连续保存两次，通过 printf 打印 `registry.active_sector`，确认地址在两个扇区之间交替。

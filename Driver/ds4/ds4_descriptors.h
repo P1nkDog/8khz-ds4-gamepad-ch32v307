@@ -6,8 +6,8 @@
 * Description        : ds4描述文件头文件
 *********************************************************************************/
 
-#ifndef DS4_DESCRIPTORS_H_
-#define DS4_DESCRIPTORS_H_
+#ifndef DS4_DESCRIPTORS_H
+#define DS4_DESCRIPTORS_H
 
 #define PS4_ENDPOINT_SIZE 64
 
@@ -752,6 +752,6 @@ static const uint8_t ps4_configuration_descriptor[] =
 
 
 
-#endif
+#endif //DS4_DESCRIPTORS_H
 
 
