@@ -19,6 +19,11 @@
 JoystickCalibConfig g_joystickCalib;
 GamepadSettings g_gamepadSettings;
 
+//--------------------------------------------------------------------+
+// 静态缓冲区
+//--------------------------------------------------------------------+
+
+static uint8_t sector_buf[CONFIG_FLASH_SECTOR_SIZE];
 
 //--------------------------------------------------------------------+
 // 默认值
@@ -155,30 +160,28 @@ const ConfigDesc* config_get_desc_by_index(uint8_t index){
 
 //验证一个扇区的数据是否有效
 static bool validate_sector(uint32_t addr){
-    uint8_t buf[CONFIG_FLASH_SECTOR_SIZE];
-    config_hal_read(addr, buf, sizeof(buf));
+    config_hal_read(addr, sector_buf, sizeof(sector_buf));
 
-    ConfigHeader *h = (ConfigHeader *)buf;
+    ConfigHeader *h = (ConfigHeader *)sector_buf;
     if (h->magic != CONFIG_MAGIC) return false;
 
-    uint16_t stored = buf[CONFIG_FLASH_SECTOR_SIZE - 2] | (buf[CONFIG_FLASH_SECTOR_SIZE - 1] <<8);
-    uint16_t calc = crc16_update(0xFFFF, buf, CONFIG_FLASH_SECTOR_SIZE - 2);
+    uint16_t stored = sector_buf[CONFIG_FLASH_SECTOR_SIZE - 2] | (sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] <<8);
+    uint16_t calc = crc16_update(0xFFFF, sector_buf, CONFIG_FLASH_SECTOR_SIZE - 2);
     return (stored == calc);
 }
 
 //从指定扇区加载数据
 static void load_sector(uint32_t addr){
-    uint8_t buf[CONFIG_FLASH_SECTOR_SIZE];
-    config_hal_read(addr, buf, sizeof(buf));
+    config_hal_read(addr, sector_buf, sizeof(sector_buf));
 
-    ConfigHeader *h = (ConfigHeader *)buf;
+    ConfigHeader *h = (ConfigHeader *)sector_buf;
     if (h->magic != CONFIG_MAGIC) return;
 
     //遍历所有tlv数据
     uint32_t offset = sizeof(ConfigHeader);
     while(offset + sizeof(ConfigRecord) <= CONFIG_FLASH_SECTOR_SIZE - 4)
     {
-        ConfigRecord *rec = (ConfigRecord *)(buf + offset);
+        ConfigRecord *rec = (ConfigRecord *)(sector_buf + offset);
 
         //遇到终止符(0x0000)停止
         if (rec->type == 0x0000) break;
@@ -219,8 +222,7 @@ bool config_save(void){
                         : CONFIG_FLASH_SECTOR_A_ADDR;
     
     //在ram中构建完整的tlv数据
-    uint8_t buf[CONFIG_FLASH_SECTOR_SIZE];
-    memset(buf, 0xFF, sizeof(buf));
+    memset(sector_buf, 0xFF, sizeof(sector_buf));
     uint32_t offset = 0;
 
     //写header
@@ -229,7 +231,7 @@ bool config_save(void){
         .version = 1,
         .count = registry.count,
     };
-    memcpy(buf + offset, &header, sizeof(header));
+    memcpy(sector_buf + offset, &header, sizeof(header));
     offset += sizeof(header);
 
     //写每个配置组的record
@@ -245,21 +247,21 @@ bool config_save(void){
         //空间检查
         if (offset + rec.length > CONFIG_FLASH_SECTOR_SIZE - 4) break;
 
-        memcpy(buf + offset, &rec, sizeof(rec));
+        memcpy(sector_buf + offset, &rec, sizeof(rec));
         offset += sizeof(rec);
-        memcpy(buf + offset, d->ram, d->size);
+        memcpy(sector_buf + offset, d->ram, d->size);
         offset += d->size;
     }
     
     //写footer
     ConfigFooter footer = {.terminator = 0};
-    memcpy(buf + offset, &footer, sizeof(footer));
+    memcpy(sector_buf + offset, &footer, sizeof(footer));
     offset += sizeof(footer);
 
     //写crc
-    uint16_t crc = crc16_update(0xFFFF, buf, CONFIG_FLASH_SECTOR_SIZE - 2);
-    buf[CONFIG_FLASH_SECTOR_SIZE - 2] = crc & 0xFF;
-    buf[CONFIG_FLASH_SECTOR_SIZE - 1] = crc >> 8;
+    uint16_t crc = crc16_update(0xFFFF, sector_buf, CONFIG_FLASH_SECTOR_SIZE - 2);
+    sector_buf[CONFIG_FLASH_SECTOR_SIZE - 2] = crc & 0xFF;
+    sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] = crc >> 8;
 
     //写入flash
     __disable_irq();
@@ -267,7 +269,7 @@ bool config_save(void){
         __enable_irq();
         return false;
     } 
-    if(!config_hal_write(target, buf, sizeof(buf))){
+    if(!config_hal_write(target, sector_buf, sizeof(sector_buf))){
         __enable_irq();
         return false;
     }
