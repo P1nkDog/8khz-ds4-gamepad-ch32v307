@@ -257,9 +257,9 @@ bool config_save(void){
     offset += sizeof(footer);
 
     //写crc
-    uint16_t crc = crc16_update(0xFFFF, buf, offset);
-    buf[offset] = crc & 0xFF;
-    buf[offset + 1] = crc >> 8;
+    uint16_t crc = crc16_update(0xFFFF, buf, CONFIG_FLASH_SECTOR_SIZE - 2);
+    buf[CONFIG_FLASH_SECTOR_SIZE - 2] = crc & 0xFF;
+    buf[CONFIG_FLASH_SECTOR_SIZE - 1] = crc >> 8;
 
     //写入flash
     __disable_irq();
@@ -274,7 +274,9 @@ bool config_save(void){
     __enable_irq();
 
     //回读验证
-    if (!validate_sector(target)) return false;
+    if (!validate_sector(target)) {
+        return false;
+    }
 
     //更新状态
     registry.active_sector = target;

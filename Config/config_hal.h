@@ -16,8 +16,8 @@
 #define CONFIG_FLASH_SECTOR_SIZE 0x1000
 
 //´¢´æÇøµØÖ·
-#define CONFIG_FLASH_SECTOR_A_ADDR  0x00046000
-#define CONFIG_FLASH_SECTOR_B_ADDR  0x00047000
+#define CONFIG_FLASH_SECTOR_A_ADDR  0x08046000
+#define CONFIG_FLASH_SECTOR_B_ADDR  0x08047000
 
 //²Á³ýÉÈÇø
 bool config_hal_erase_sector(uint32_t sector_addr);

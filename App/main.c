@@ -53,20 +53,10 @@ int main(void)
     printf("Gamepad Settings:\r\n");
     printf("  deadzone=%d\r\n", s->deadzone);
 
-    // ===== ≤‚ ‘±£¥Ê =====
-    GamepadSettings *s_mut = config_get_mutable(CONFIG_ID_GAMEPAD_SETTINGS);
-    s_mut->deadzone = 100;
-    config_mark_dirty(CONFIG_ID_GAMEPAD_SETTINGS);
-    bool ok = config_save();
-    printf("Save: %s\r\n", ok ? "OK" : "FAIL");
-    printf("deadzone now: %d\r\n", s_mut->deadzone);
-    // ===== ≤‚ ‘Ω· ¯ =====
-
     gamepad_init();
     tud_init(BOARD_TUD_RHPORT);
 	printf("SystemClk:%d\r\n",SystemCoreClock);
 	printf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
-	printf("This is printf example\r\n");
 
 
 
