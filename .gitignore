@@ -1,11 +1,11 @@
 # 编译产物
-obj/.mrs/
-CLAUDE.md
-Docs/\350\215\211\347\250\277.md
 obj/
-.template
-*.wvproj
-Docs/草稿.md
+
+# 文档
+Docs/
+
+# 工具配置
+CLAUDE.md
 .template
 *.wvproj
 .mrs/

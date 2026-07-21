@@ -18,6 +18,7 @@
 //--------------------------------------------------------------------+
 JoystickCalibConfig g_joystickCalib;
 GamepadSettings g_gamepadSettings;
+PollingRateConfig g_pollingrate;
 
 //--------------------------------------------------------------------+
 // æ≤Ã¨ª∫≥Â«¯
@@ -39,6 +40,10 @@ static const JoystickCalibConfig joystickCalibDefault = {
 
 static const GamepadSettings gamepadSettingsDefault = {
     .deadzone = 3,
+};
+
+static const PollingRateConfig pollingRateDefault = {
+    .level = POLL_RATE_1000,
 };
 
 
@@ -304,6 +309,8 @@ void config_init(void){
                     &g_joystickCalib, &joystickCalibDefault, "joystick_calib");
     config_register(CONFIG_ID_GAMEPAD_SETTINGS, 1, sizeof(GamepadSettings), 
                     &g_gamepadSettings, &gamepadSettingsDefault, "gamepad_settings");
+    config_register(CONFIG_ID_POLLING_RATE, 1, sizeof(PollingRateConfig),
+                    &g_pollingrate, &pollingRateDefault, "polling_rate");
     
     //¥”configº”‘ÿ
     bool a_ok = validate_sector(CONFIG_FLASH_SECTOR_A_ADDR);

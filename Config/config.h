@@ -19,6 +19,7 @@
 enum{
     CONFIG_ID_JOYSTICK_CALIB   = 1,
     CONFIG_ID_GAMEPAD_SETTINGS = 2,
+    CONFIG_ID_POLLING_RATE     = 3,
 };
 
 //--------------------------------------------------------------------+
@@ -35,6 +36,20 @@ typedef struct{
     uint16_t deadzone;
 
 } GamepadSettings;
+
+//回报率设置
+typedef enum{
+    POLL_RATE_250  = 0,
+    POLL_RATE_500  = 1,
+    POLL_RATE_1000 = 2,
+    POLL_RATE_2000 = 3,
+    POLL_RATE_4000 = 4,
+    POLL_RATE_8000 = 5,
+} PollingRateLevel;
+
+typedef struct{
+    uint8_t level;
+} PollingRateConfig;
 
 //--------------------------------------------------------------------+
 // 配置组描述符
@@ -116,6 +131,7 @@ const ConfigDesc* config_get_desc_by_index(uint8_t index);
 //--------------------------------------------------------------------+
 extern JoystickCalibConfig g_joystickCalib;
 extern GamepadSettings g_gamepadSettings;
+extern PollingRateConfig g_pollingrate;
 
 
 #endif //CONFIG_H
