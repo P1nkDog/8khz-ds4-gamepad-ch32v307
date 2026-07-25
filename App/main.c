@@ -13,6 +13,7 @@
 #include "ds4_driver.h"
 #include "gamepad.h"
 #include "config.h"
+#include "us_timer.h"
 
 
 /* Global typedef */
@@ -31,40 +32,28 @@
  */
 int main(void)
 {
-	board_init();
+    board_init();
     config_init();
-        printf("\r\n=== Config Debug ===\r\n");
-    printf("Groups: %d\r\n", config_get_count());
-
-    for (int i = 0; i < config_get_count(); i++) {
-        const ConfigDesc *d = config_get_desc_by_index(i);
-        printf("  [%d] id=%d ver=%d size=%d name=%s\r\n",
-            i, d->id, d->version, d->size, d->name);
-    }
-
-    const JoystickCalibConfig *calib = (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
-    printf("Joystick Calib:\r\n");
-    for (int i = 0; i < 4; i++) {
-        printf("  [%d] min=%d center=%d max=%d\r\n",
-            i, calib->calib[i].min, calib->calib[i].center, calib->calib[i].max);
-    }
-
-    const GamepadSettings *s = (const GamepadSettings *)config_get(CONFIG_ID_GAMEPAD_SETTINGS);
-    printf("Gamepad Settings:\r\n");
-    printf("  deadzone=%d\r\n", s->deadzone);
+    us_timer_init();
 
     gamepad_init();
     tud_init(BOARD_TUD_RHPORT);
-	printf("SystemClk:%d\r\n",SystemCoreClock);
-	printf( "ChipID:%08x\r\n", DBGMCU_GetCHIPID() );
+    printf("SystemClk:%d\r\n", SystemCoreClock);
+    printf("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
 
-
+    uint32_t send_interval_us = config_get_poll_interval_us();
+    uint32_t last_send_us = 0;
 
 	while(1)
     {
         tud_task();
-        gamepad_process();
-        ds4_process(gamepad_get_state());
+
+        uint32_t now_us = micros();
+        if ((now_us - last_send_us) >= send_interval_us) {
+            gamepad_process();
+            ds4_process(gamepad_get_state());
+            last_send_us = now_us;
+        }
 	}
 }
 

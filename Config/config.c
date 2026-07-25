@@ -46,6 +46,24 @@ static const PollingRateConfig pollingRateDefault = {
     .level = POLL_RATE_1000,
 };
 
+//--------------------------------------------------------------------+
+// 回报率间隔映射
+//--------------------------------------------------------------------+
+
+static const uint32_t polling_interval_us[] = {
+    [POLL_RATE_250]  = 4000,   // 250Hz  → 4000μs
+    [POLL_RATE_500]  = 2000,   // 500Hz  → 2000μs
+    [POLL_RATE_1000] = 1000,   // 1000Hz → 1000μs
+    [POLL_RATE_2000] = 500,    // 2000Hz → 500μs
+    [POLL_RATE_4000] = 250,    // 4000Hz → 250μs
+    [POLL_RATE_8000] = 125,    // 8000Hz → 125μs
+};
+
+uint32_t config_get_poll_interval_us(void) {
+    const PollingRateConfig *cfg =
+        (const PollingRateConfig *)config_get(CONFIG_ID_POLLING_RATE);
+    return polling_interval_us[cfg->level];
+}
 
 //--------------------------------------------------------------------+
 // 注册表

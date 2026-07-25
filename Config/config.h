@@ -125,6 +125,7 @@ uint8_t config_get_count(void);
 //获取配置组描述符
 const ConfigDesc* config_get_desc(uint16_t id);
 const ConfigDesc* config_get_desc_by_index(uint8_t index);
+uint32_t config_get_poll_interval_us(void);
 
 //--------------------------------------------------------------------+
 // 配置组实例

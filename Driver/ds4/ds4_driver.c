@@ -12,6 +12,7 @@
 #include "tusb.h"
 #include "ds4_descriptors.h"
 #include "ds4_driver.h"
+#include "us_timer.h"
 
 //--------------------------------------------------------------------+
 // 初始化
@@ -24,9 +25,12 @@ void ds4_driver_init(void) {
 // 手柄数据发送
 //--------------------------------------------------------------------+
 void ds4_send_report(PS4Report *report) {
-    if (tud_hid_ready()) {
-        tud_hid_report(0, report, sizeof(PS4Report));
+    uint32_t deadline = micros() + 100;
+    while (!tud_hid_ready()) {
+        tud_task();
+        if ((int32_t)(micros() - deadline) >= 0) return;
     }
+    tud_hid_report(0, report, sizeof(PS4Report));
 }
 
 //--------------------------------------------------------------------+
