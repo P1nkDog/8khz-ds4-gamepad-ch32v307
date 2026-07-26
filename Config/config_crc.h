@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/19
-* Description        : crcĞ£Ñé
+* Description        : crcæ ¡éªŒ
 *********************************************************************************/
 
 #ifndef CONFIG_CRC_H
@@ -46,11 +46,11 @@ static const uint16_t crc16_table[256] = {
     0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0,
 };
 
-// ¼ÆËã CRC16-CCITT
-// crc: ³õÊ¼Öµ´« 0xFFFF ¶àÏîÊ½0x1021
-// data: Êı¾İÖ¸Õë
-// len: Êı¾İ³¤¶È
-// ·µ»ØÖµ: ¼ÆËãºóµÄ CRC
+// è®¡ç®— CRC16-CCITT
+// crc: åˆå§‹å€¼ä¼  0xFFFF å¤šé¡¹å¼0x1021
+// data: æ•°æ®æŒ‡é’ˆ
+// len: æ•°æ®é•¿åº¦
+// è¿”å›å€¼: è®¡ç®—åçš„ CRC
 static inline uint16_t crc16_update(uint16_t crc, const uint8_t *data, uint32_t len) {
     for (uint32_t i = 0; i < len; i++) {
         crc = (crc << 8) ^ crc16_table[((crc >> 8) ^ data[i]) & 0xFF];

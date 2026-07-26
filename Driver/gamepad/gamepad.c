@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/10
-* Description        : GPIO按键和摇杆ADC数据映射
+* Description        : GPIO鎸夐敭鍜屾憞鏉咥DC鏁版嵁鏄犲皠
 *********************************************************************************/
 
 #include "gamepad.h"

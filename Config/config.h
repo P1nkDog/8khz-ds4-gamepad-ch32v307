@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/19
-* Description        : ÊÖ±úÅäÖÃÎÄ¼şÊı¾İ½á¹¹£¬apiÉùÃ÷
+* Description        : æ‰‹æŸ„é…ç½®æ–‡ä»¶æ•°æ®ç»“æ„ï¼Œapiå£°æ˜
 *********************************************************************************/
 
 #ifndef CONFIG_H
@@ -14,7 +14,7 @@
 #include "joystick.h"
 
 //--------------------------------------------------------------------+
-// ÅäÖÃ×é±àºÅ
+// é…ç½®ç»„ç¼–å·
 //--------------------------------------------------------------------+
 enum{
     CONFIG_ID_JOYSTICK_CALIB   = 1,
@@ -23,21 +23,21 @@ enum{
 };
 
 //--------------------------------------------------------------------+
-// ÅäÖÃ×éÊı¾İ½á¹¹
+// é…ç½®ç»„æ•°æ®ç»“æ„
 //--------------------------------------------------------------------+
 
-//Ò¡¸ËĞ£×¼Êı¾İ
+//æ‘‡æ†æ ¡å‡†æ•°æ®
 typedef struct{
     JoystickCalibration calib[4]; //[0]=LX [1]=LY [2]=RX [3]=RY
 } JoystickCalibConfig;
 
-//ÊÖ±úÉèÖÃ
+//æ‰‹æŸ„è®¾ç½®
 typedef struct{
     uint16_t deadzone;
 
 } GamepadSettings;
 
-//»Ø±¨ÂÊÉèÖÃ
+//å›æŠ¥ç‡è®¾ç½®
 typedef enum{
     POLL_RATE_250  = 0,
     POLL_RATE_500  = 1,
@@ -52,7 +52,7 @@ typedef struct{
 } PollingRateConfig;
 
 //--------------------------------------------------------------------+
-// ÅäÖÃ×éÃèÊö·û
+// é…ç½®ç»„æè¿°ç¬¦
 //--------------------------------------------------------------------+
 
 typedef struct{
@@ -68,19 +68,19 @@ typedef struct{
 #define CONFIG_MAX_GROUPS 16
 
 //--------------------------------------------------------------------+
-// tlvÊı¾İ¸ñÊ½
+// tlvæ•°æ®æ ¼å¼
 //--------------------------------------------------------------------+
 
 #define CONFIG_MAGIC 0xCF07
 
-//ÎÄ¼şÍ·
+//æ–‡ä»¶å¤´
 typedef struct{
     uint16_t magic;
     uint8_t version;
     uint8_t count;
 } __attribute__((packed)) ConfigHeader;
 
-//Ã¿¸öÅäÖÃ×éµÄ¼ÇÂ¼Í·
+//æ¯ä¸ªé…ç½®ç»„çš„è®°å½•å¤´
 typedef struct{
     uint16_t type;
     uint16_t length;
@@ -89,46 +89,46 @@ typedef struct{
     uint8_t data[];
 } __attribute__((packed)) ConfigRecord;
 
-//ÎÄ¼şÎ²
+//æ–‡ä»¶å°¾
 typedef struct{
     uint16_t terminator;
 } __attribute__((packed)) ConfigFooter;
 
 //--------------------------------------------------------------------+
-// api½Ó¿Ú
+// apiæ¥å£
 //--------------------------------------------------------------------+
 
-//³õÊ¼»¯
+//åˆå§‹åŒ–
 void config_init(void);
 
-//±£´æĞŞ¸Ä
+//ä¿å­˜ä¿®æ”¹
 bool config_save(void);
 
-//ÖØÖÃÄ³¸öÅäÖÃÎªÄ¬ÈÏÖµ
+//é‡ç½®æŸä¸ªé…ç½®ä¸ºé»˜è®¤å€¼
 bool config_reset(uint16_t id);
 
-//ÖØÖÃËùÓĞÅäÖÃÎªÄ¬ÈÏÖµ
+//é‡ç½®æ‰€æœ‰é…ç½®ä¸ºé»˜è®¤å€¼
 void config_reset_all(void);
 
-//»ñµÃÅäÖÃ×éµÄÖ»¶ÁÖ¸Õë
+//è·å¾—é…ç½®ç»„çš„åªè¯»æŒ‡é’ˆ
 const void* config_get(uint16_t id);
 
-//»ñµÃÅäÖÃ×éµÄ¿ÉĞ´Ö¸Õë
+//è·å¾—é…ç½®ç»„çš„å¯å†™æŒ‡é’ˆ
 void* config_get_mutable(uint16_t id);
 
-//±ê¼ÇÄ³¸öÅäÖÃ×éÒÑĞŞ¸Ä
+//æ ‡è®°æŸä¸ªé…ç½®ç»„å·²ä¿®æ”¹
 void config_mark_dirty(uint16_t id);
 
-//»ñÈ¡ÒÑ¾­×¢²áµÄÅäÖÃ×é
+//è·å–å·²ç»æ³¨å†Œçš„é…ç½®ç»„
 uint8_t config_get_count(void);
 
-//»ñÈ¡ÅäÖÃ×éÃèÊö·û
+//è·å–é…ç½®ç»„æè¿°ç¬¦
 const ConfigDesc* config_get_desc(uint16_t id);
 const ConfigDesc* config_get_desc_by_index(uint8_t index);
 uint32_t config_get_poll_interval_us(void);
 
 //--------------------------------------------------------------------+
-// ÅäÖÃ×éÊµÀı
+// é…ç½®ç»„å®ä¾‹
 //--------------------------------------------------------------------+
 extern JoystickCalibConfig g_joystickCalib;
 extern GamepadSettings g_gamepadSettings;

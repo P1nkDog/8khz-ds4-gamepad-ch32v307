@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/01
-* Description        : ds4Çı¶¯ÎÄ¼ş
+* Description        : ds4é©±åŠ¨æ–‡ä»¶
 *********************************************************************************/
 
 #include <string.h>
@@ -15,14 +15,14 @@
 #include "us_timer.h"
 
 //--------------------------------------------------------------------+
-// ³õÊ¼»¯
+// åˆå§‹åŒ–
 //--------------------------------------------------------------------+
 void ds4_driver_init(void) {
-    // TODO: ³õÊ¼»¯ GPIO¡¢ADC
+    // TODO: åˆå§‹åŒ– GPIOã€ADC
 }
 
 //--------------------------------------------------------------------+
-// ÊÖ±úÊı¾İ·¢ËÍ
+// æ‰‹æŸ„æ•°æ®å‘é€
 //--------------------------------------------------------------------+
 void ds4_send_report(PS4Report *report) {
     uint32_t deadline = micros() + 100;
@@ -34,7 +34,7 @@ void ds4_send_report(PS4Report *report) {
 }
 
 //--------------------------------------------------------------------+
-// Ö÷Ñ­»·´¦Àí
+// ä¸»å¾ªç¯å¤„ç†
 //--------------------------------------------------------------------+
 void ds4_process(const GamepadState *state) {
 
@@ -77,10 +77,10 @@ void ds4_process(const GamepadState *state) {
 
 
 //--------------------------------------------------------------------+
-// Ô¤ÉèµÄ Feature Report Êı¾İ£¨ÈÏÖ¤ÈÆ¹ı£¬²Î¿¼ GP2040-CE£©
+// é¢„è®¾çš„ Feature Report æ•°æ®ï¼ˆè®¤è¯ç»•è¿‡ï¼Œå‚è€ƒ GP2040-CEï¼‰
 //--------------------------------------------------------------------+
 
-// Ğ£×¼Êı¾İ (Report ID 0x02, 36 bytes)
+// æ ¡å‡†æ•°æ® (Report ID 0x02, 36 bytes)
 static const uint8_t ps4_output_0x02[] = {
     0xfe, 0xff, 0x0e, 0x00, 0x04, 0x00, 0xd4, 0x22,
     0x2a, 0xdd, 0xbb, 0x22, 0x5e, 0xdd, 0x81, 0x22,
@@ -89,7 +89,7 @@ static const uint8_t ps4_output_0x02[] = {
     0x83, 0xdf, 0x0c, 0x00
 };
 
-// ¿ØÖÆÆ÷¶¨Òå (Report ID 0x03, 47 bytes)
+// æ§åˆ¶å™¨å®šä¹‰ (Report ID 0x03, 47 bytes)
 static const uint8_t ps4_output_0x03[] = {
     0x21, 0x27, 0x04, 0xcf, 0x00, 0x2c, 0x56,
     0x08, 0x00, 0x3d, 0x00, 0xe8, 0x03, 0x04, 0x00,
@@ -105,7 +105,7 @@ static uint8_t ps4_output_0x12[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00   // host MAC
 };
 
-// °æ±¾ÈÕÆÚ (Report ID 0xA3, 48 bytes)
+// ç‰ˆæœ¬æ—¥æœŸ (Report ID 0xA3, 48 bytes)
 static const uint8_t ps4_output_0xa3[] = {
     0x4a, 0x75, 0x6e, 0x20, 0x20, 0x39, 0x20, 0x32,
     0x30, 0x31, 0x37, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -115,9 +115,9 @@ static const uint8_t ps4_output_0xa3[] = {
     0x07, 0xa0, 0x10, 0x20, 0x00, 0xa0, 0x02, 0x00
 };
 
-// Ç©Ãû×´Ì¬ - ÈÏÖ¤Î´¾ÍĞ÷ (Report ID 0xF2, 15 bytes)
+// ç­¾åçŠ¶æ€ - è®¤è¯æœªå°±ç»ª (Report ID 0xF2, 15 bytes)
 static const uint8_t ps4_output_0xf2_notready[] = {
-    0xF2, 0x00, 0x10,  // byte[2] = 16 ±íÊ¾"ÈÔÔÚÇ©ÃûÖĞ"
+    0xF2, 0x00, 0x10,  // byte[2] = 16 è¡¨ç¤º"ä»åœ¨ç­¾åä¸­"
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
@@ -126,7 +126,7 @@ static const uint8_t ps4_output_0xf3[] = {
 };
 
 //--------------------------------------------------------------------+
-// Éè±¸ÃèÊö·û»Øµ÷
+// è®¾å¤‡æè¿°ç¬¦å›è°ƒ
 //--------------------------------------------------------------------+
 
 uint8_t const *tud_descriptor_device_cb(void) {
@@ -134,7 +134,7 @@ uint8_t const *tud_descriptor_device_cb(void) {
 }
 
 //--------------------------------------------------------------------+
-// ÅäÖÃÃèÊö·û»Øµ÷
+// é…ç½®æè¿°ç¬¦å›è°ƒ
 //--------------------------------------------------------------------+
 
 // Invoked when received GET CONFIGURATION DESCRIPTOR
@@ -147,7 +147,7 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 
 
 //--------------------------------------------------------------------+
-// ×Ö·û´®ÃèÊö·û
+// å­—ç¬¦ä¸²æè¿°ç¬¦
 //--------------------------------------------------------------------+
 
 // String Descriptor Index
@@ -214,7 +214,7 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 }
 
 //--------------------------------------------------------------------+
-// HID ±¨¸æÃèÊö·û
+// HID æŠ¥å‘Šæè¿°ç¬¦
 //--------------------------------------------------------------------+
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
     (void)instance;
@@ -222,7 +222,7 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
 }
 
 //--------------------------------------------------------------------+
-// HID »Øµ÷ - GET_REPORT
+// HID å›è°ƒ - GET_REPORT
 //--------------------------------------------------------------------+
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
                                 hid_report_type_t report_type,
@@ -278,7 +278,7 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
 }
 
 //--------------------------------------------------------------------+
-// HID »Øµ÷ - SET_REPORT
+// HID å›è°ƒ - SET_REPORT
 //--------------------------------------------------------------------+
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                             hid_report_type_t report_type,
@@ -289,10 +289,10 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
     (void)bufsize;
 
     if (report_type == HID_REPORT_TYPE_OUTPUT) {
-        // Report ID 5: LED/Õğ¶¯Êı¾İ£¬ºöÂÔ
+        // Report ID 5: LED/éœ‡åŠ¨æ•°æ®ï¼Œå¿½ç•¥
     } else if (report_type == HID_REPORT_TYPE_FEATURE) {
         if (report_id == PS4_SET_AUTH_PAYLOAD) {
-            // 0xF0: ÈÏÖ¤¸ºÔØ£¬ºöÂÔ
+            // 0xF0: è®¤è¯è´Ÿè½½ï¼Œå¿½ç•¥
         }
     }
 }

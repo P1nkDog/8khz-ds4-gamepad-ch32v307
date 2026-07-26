@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/10
-* Description        : GPIO°´¼üÓ³ÉäºÍÒ¡¸ËADCÊı¾İ´¦Àí½Ó¿Ú¶¨Òå
+* Description        : GPIOæŒ‰é”®æ˜ å°„å’Œæ‘‡æ†ADCæ•°æ®å¤„ç†æ¥å£å®šä¹‰
 *********************************************************************************/
 
 #ifndef GAMEPAD_H
@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-// DPADÑÚÂë
+// DPADæ©ç 
 #define GAMEPAD_HAT_UP        0x00
 #define GAMEPAD_HAT_UPRIGHT   0x01
 #define GAMEPAD_HAT_RIGHT     0x02
@@ -23,20 +23,20 @@
 #define GAMEPAD_HAT_NOTHING   0x0F
 
 //--------------------------------------------------------------------+
-// Êı¾İ½á¹¹
+// æ•°æ®ç»“æ„
 //--------------------------------------------------------------------+
 typedef struct{
 
-    //Ò¡¸ËÊı¾İ
+    //æ‘‡æ†æ•°æ®
     uint16_t lx;
     uint16_t ly;
     uint16_t rx;
     uint16_t ry;
 
-    //·½Ïò¼ü
+    //æ–¹å‘é”®
     uint8_t dpad : 4;
 
-    //°´¼ü
+    //æŒ‰é”®
     uint16_t buttonWest : 1;
     uint16_t buttonSouth : 1;
     uint16_t buttonEast : 1;
@@ -54,14 +54,14 @@ typedef struct{
 } GamepadState;
 
 //--------------------------------------------------------------------+
-// ½Ó¿Ú¶¨Òå
+// æ¥å£å®šä¹‰
 //--------------------------------------------------------------------+
 
-//³õÊ¼»¯
+//åˆå§‹åŒ–
 void gamepad_init(void);
-//Êı¾İÓ³Éä
+//æ•°æ®æ˜ å°„
 void gamepad_process(void);
-//»ñÈ¡ÊÖ±úÒ¡¸Ë°´¼ü×´Ì¬
+//è·å–æ‰‹æŸ„æ‘‡æ†æŒ‰é”®çŠ¶æ€
 const GamepadState* gamepad_get_state(void);
 
 

@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/19
-* Description        : flash擦写实现
+* Description        : flash鎿﹀啓瀹炵幇
 *********************************************************************************/
 
 #include "config_hal.h"
@@ -13,13 +13,13 @@
 
 
 
-//擦除扇区
+//鎿﹂櫎鎵囧尯
 bool config_hal_erase_sector(uint32_t sector_addr){
     FLASH_Status status = FLASH_ROM_ERASE(sector_addr, CONFIG_FLASH_SECTOR_SIZE);
     return (status == FLASH_COMPLETE);
 }
 
-//向flash写入数据
+//鍚慺lash鍐欏叆鏁版嵁
 bool config_hal_write(uint32_t addr, const uint8_t *data, uint32_t len){
     uint32_t aligned_len = (len + 3) & ~3;
 
@@ -31,7 +31,7 @@ bool config_hal_write(uint32_t addr, const uint8_t *data, uint32_t len){
     return (status == FLASH_COMPLETE);
 }
 
-//读取数据
+//璇诲彇鏁版嵁
 void config_hal_read(uint32_t addr, uint8_t *buf, uint32_t len){
     const uint8_t *src = (const uint8_t *)addr;
     for (uint32_t i = 0; i < len; i++){

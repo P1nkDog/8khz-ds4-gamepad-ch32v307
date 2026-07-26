@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/24
-* Description        : TIM2 Î¢Ãë¶¨Ê±Æ÷
+* Description        : TIM2 å¾®ç§’å®šæ—¶å™¨
 *********************************************************************************/
 
 #include "ch32v30x.h"
@@ -12,7 +12,7 @@
 static volatile uint32_t tim2_overflow_count = 0;
 
 //--------------------------------------------------------------------+
-// tim2Òç³öÖĞ¶Ï´¦Àí
+// tim2æº¢å‡ºä¸­æ–­å¤„ç†
 //--------------------------------------------------------------------+
 
 void TIM2_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
@@ -25,17 +25,17 @@ void TIM2_IRQHandler(void){
 }
 
 //--------------------------------------------------------------------+
-// tim2³õÊ¼»¯
+// tim2åˆå§‹åŒ–
 //--------------------------------------------------------------------+
 
 void us_timer_init(void){
     TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure = {0};
     NVIC_InitTypeDef NVIC_InitStructure = {0};
 
-    //Ê¹ÄÜtim2Ê±ÖÓ
+    //ä½¿èƒ½tim2æ—¶é’Ÿ
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
 
-    //¶¨Ê±Æ÷»ù´¡ÅäÖÃ
+    //å®šæ—¶å™¨åŸºç¡€é…ç½®
     TIM_TimeBaseStructure.TIM_Period = 0xFFFF;
     TIM_TimeBaseStructure.TIM_Prescaler = 143;
     TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
@@ -43,32 +43,32 @@ void us_timer_init(void){
     TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &TIM_TimeBaseStructure);
 
-    //Çå³ı¸üĞÂÖĞ¶Ï±êÖ¾
+    //æ¸…é™¤æ›´æ–°ä¸­æ–­æ ‡å¿—
     TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
 
-    //ÅäÖÃNVIC
+    //é…ç½®NVIC
     NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
     NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
     NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    //Ê¹ÄÜ¸üĞÂÖĞ¶Ï
+    //ä½¿èƒ½æ›´æ–°ä¸­æ–­
     TIM_ITConfig(TIM2, TIM_IT_Update, ENABLE);
 
-    //Æô¶¯¶¨Ê±Æ÷
+    //å¯åŠ¨å®šæ—¶å™¨
     TIM_Cmd(TIM2, ENABLE);
 }
 
 
 //--------------------------------------------------------------------+
-// ¶ÁÈ¡µ±Ç°Ê±¼ä
+// è¯»å–å½“å‰æ—¶é—´
 //--------------------------------------------------------------------+
 uint32_t micros(void){
     uint32_t overflow;
     uint16_t cnt;
 
-    //¶ÁÈ¡Á½´ÎÈ·±£Ò»ÖÂ
+    //è¯»å–ä¸¤æ¬¡ç¡®ä¿ä¸€è‡´
     do{
         overflow = tim2_overflow_count;
         cnt = TIM_GetCounter(TIM2);

@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/24
-* Description        : TIM2 Î¢Ãë¶¨Ê±Æ÷½Ó¿ÚÉùÃ÷
+* Description        : TIM2 å¾®ç§’å®šæ—¶å™¨æ¥å£å£°æ˜
 *********************************************************************************/
 
 #ifndef US_TIMER_H
@@ -11,9 +11,9 @@
 
 #include <stdint.h>
 
-//³õÊ¼»¯
+//åˆå§‹åŒ–
 void us_timer_init(void);
-//Ê±¼ä¶ÁÈ¡
+//æ—¶é—´è¯»å–
 uint32_t micros(void);
 
 #endif //US_TIMER_H

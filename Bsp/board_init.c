@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/01
-* Description        : ÏµÍ³³õÊ¼»¯
+* Description        : ç³»ç»Ÿåˆå§‹åŒ–
 *********************************************************************************/
 
 #include "stdio.h"
@@ -16,7 +16,7 @@
 #include "board.h"
 
 //--------------------------------------------------------------------+
-// ½«USBÖĞ¶ÏÊÂ¼ş×ª·¢µ½TinyUSB IRQ´¦ÀíÆ÷
+// å°†USBä¸­æ–­äº‹ä»¶è½¬å‘åˆ°TinyUSB IRQå¤„ç†å™¨
 //--------------------------------------------------------------------+
 
 // TODO maybe having FS as port0, HS as port1
@@ -34,10 +34,10 @@ __attribute__((interrupt)) void OTG_FS_IRQHandler(void) {
 }
 
 //--------------------------------------------------------------------+
-// MACRO TYPEDEF CONSTANT ENUM ºêÀàĞÍ¶¨Òå³£ÊıÃ¶¾Ù
+// MACRO TYPEDEF CONSTANT ENUM å®ç±»å‹å®šä¹‰å¸¸æ•°æšä¸¾
 //--------------------------------------------------------------------+
 
-static uint32_t SysTick_Config(uint32_t ticks) {            //SysTick ÅäÖÃ
+static uint32_t SysTick_Config(uint32_t ticks) {            //SysTick é…ç½®
   NVIC_EnableIRQ(SysTicK_IRQn);
   SysTick->CTLR = 0;
   SysTick->SR = 0;
@@ -47,14 +47,14 @@ static uint32_t SysTick_Config(uint32_t ticks) {            //SysTick ÅäÖÃ
   return 0;
 }
 
-void board_init(void) {                                    //°å¼¶×Ü³õÊ¼»¯º¯Êı
+void board_init(void) {                                    //æ¿çº§æ€»åˆå§‹åŒ–å‡½æ•°
 
   /* Disable interrupts during init */
-  __disable_irq();                                         //¹Ø±ÕÈ«¾ÖÖĞ¶Ï
+  __disable_irq();                                         //å…³é—­å…¨å±€ä¸­æ–­
 
-	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);         //NVICÓÅÏÈ¼¶·Ö×é
-	SystemCoreClockUpdate();                                //¸üĞÂÏµÍ³Ê±ÖÓ
-  Delay_Init();                                           //ÑÓÊ±º¯Êı³õÊ¼»¯
+	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);         //NVICä¼˜å…ˆçº§åˆ†ç»„
+	SystemCoreClockUpdate();                                //æ›´æ–°ç³»ç»Ÿæ—¶é’Ÿ
+  Delay_Init();                                           //å»¶æ—¶å‡½æ•°åˆå§‹åŒ–
 
 
 
@@ -62,11 +62,11 @@ void board_init(void) {                                    //°å¼¶×Ü³õÊ¼»¯º¯Êı
   SysTick_Config(SystemCoreClock / 1000);
 #endif
 
-  USART_Printf_Init(CFG_BOARD_UART_BAUDRATE);             //³õÊ¼»¯ UART ´®¿Ú
+  USART_Printf_Init(CFG_BOARD_UART_BAUDRATE);             //åˆå§‹åŒ– UART ä¸²å£
 
 #ifdef CH32V30x_D8C
   // v305/v307: Highspeed USB
-  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_USBPHY);      //USBHS Ê±ÖÓÅäÖÃ
+  RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_USBPHY);      //USBHS æ—¶é’Ÿé…ç½®
   RCC_USBHSPLLCLKConfig(RCC_HSBHSPLLCLKSource_HSE);
   RCC_USBHSConfig(RCC_USBPLL_Div2);
   RCC_USBHSPLLCKREFCLKConfig(RCC_USBHSPLLCKREFCLK_4M);

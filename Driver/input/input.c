@@ -3,17 +3,17 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/09
-* Description        : ÊÖ±úGPIO°´¼üºÍÒ¡¸ËADC¶ÁÈ¡
+* Description        : æ‰‹æŸ„GPIOæŒ‰é”®å’Œæ‘‡æ†ADCè¯»å–
 *********************************************************************************/
 
 #include "input.h"
 #include "ch32v30x.h"
 
-// Ò¡¸ËĞ£×¼Öµ
+// æ‘‡æ†æ ¡å‡†å€¼
 static int16_t adc_calibrattion_val;
 
 //--------------------------------------------------------------------+
-// ADC³õÊ¼»¯
+// ADCåˆå§‹åŒ–
 //--------------------------------------------------------------------+
 static void adc_function_init(void)
 {
@@ -51,7 +51,7 @@ static void adc_function_init(void)
 
 
 //--------------------------------------------------------------------+
-// ADC¶ÁÈ¡Ô­Ê¼Öµ
+// ADCè¯»å–åŸå§‹å€¼
 //--------------------------------------------------------------------+
 static uint16_t adc_read_raw(uint8_t channel){
     ADC_RegularChannelConfig(ADC1,channel,1,ADC_SampleTime_71Cycles5);
@@ -61,7 +61,7 @@ static uint16_t adc_read_raw(uint8_t channel){
 }
 
 //--------------------------------------------------------------------+
-// ADC¶ÁÈ¡Ğ£×¼Öµ
+// ADCè¯»å–æ ¡å‡†å€¼
 //--------------------------------------------------------------------+
 static uint16_t adc_read_calibrated(uint8_t channel){
     int32_t raw_value = adc_read_raw(channel);
@@ -72,7 +72,7 @@ static uint16_t adc_read_calibrated(uint8_t channel){
 }
 
 //--------------------------------------------------------------------+
-// GPIO³õÊ¼»¯
+// GPIOåˆå§‹åŒ–
 //--------------------------------------------------------------------+
 static void button_gpio_init(void){
     GPIO_InitTypeDef GPIO_InitStructure={0};
@@ -102,7 +102,7 @@ static void button_gpio_init(void){
 }
 
 //--------------------------------------------------------------------+
-// GPIO¶ÁÈ¡
+// GPIOè¯»å–
 //--------------------------------------------------------------------+
 static uint8_t gpio_read_pin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin){
     return GPIO_ReadInputDataBit(GPIOx,GPIO_Pin);
@@ -113,17 +113,17 @@ static uint8_t gpio_read_pin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin){
 
 
 //--------------------------------------------------------------------+
-// ¹«¹²½Ó¿Ú
+// å…¬å…±æ¥å£
 //--------------------------------------------------------------------+
 
-//³õÊ¼»¯ÊäÈëÓ²¼ş£¨GPIO£¬ADC£©
+//åˆå§‹åŒ–è¾“å…¥ç¡¬ä»¶ï¼ˆGPIOï¼ŒADCï¼‰
 void input_init(void){
     adc_function_init();
     button_gpio_init();
 }
 
 
-//¶ÁÈ¡Ò¡¸Ë
+//è¯»å–æ‘‡æ†
 void input_read_joystick(JoystickData *data){
     data -> lx = adc_read_calibrated(ADC_Channel_11);
     data -> ly = adc_read_calibrated(ADC_Channel_10);
@@ -131,12 +131,12 @@ void input_read_joystick(JoystickData *data){
     data -> ry = adc_read_calibrated(ADC_Channel_12);
 }
 
-//¶ÁÈ¡±ê×¼°´¼ü
+//è¯»å–æ ‡å‡†æŒ‰é”®
 void input_read_buttons(uint32_t *buttons){
 
     *buttons = 0; 
 
-    // °´¼ü (PE0-PE6)
+    // æŒ‰é”® (PE0-PE6)
     if(gpio_read_pin(GPIOE, GPIO_Pin_6) == 0) *buttons |= INPUT_MASK_PE6;
     if(gpio_read_pin(GPIOE, GPIO_Pin_5) == 0) *buttons |= INPUT_MASK_PE5;
     if(gpio_read_pin(GPIOE, GPIO_Pin_4) == 0) *buttons |= INPUT_MASK_PE4;
@@ -145,12 +145,12 @@ void input_read_buttons(uint32_t *buttons){
     if(gpio_read_pin(GPIOE, GPIO_Pin_1) == 0) *buttons |= INPUT_MASK_PE1;
     if(gpio_read_pin(GPIOE, GPIO_Pin_0) == 0) *buttons |= INPUT_MASK_PE0;
 
-    // °´¼ü (PB3-PB5)
+    // æŒ‰é”® (PB3-PB5)
     if(gpio_read_pin(GPIOB, GPIO_Pin_5) == 0) *buttons |= INPUT_MASK_PB5;
     if(gpio_read_pin(GPIOB, GPIO_Pin_4) == 0) *buttons |= INPUT_MASK_PB4;
     if(gpio_read_pin(GPIOB, GPIO_Pin_3) == 0) *buttons |= INPUT_MASK_PB3;
 
-    // °´¼ü (PD1-PD7)
+    // æŒ‰é”® (PD1-PD7)
     if(gpio_read_pin(GPIOD, GPIO_Pin_7) == 0) *buttons |= INPUT_MASK_PD7;
     if(gpio_read_pin(GPIOD, GPIO_Pin_6) == 0) *buttons |= INPUT_MASK_PD6;
     if(gpio_read_pin(GPIOD, GPIO_Pin_5) == 0) *buttons |= INPUT_MASK_PD5;
@@ -159,7 +159,7 @@ void input_read_buttons(uint32_t *buttons){
     if(gpio_read_pin(GPIOD, GPIO_Pin_2) == 0) *buttons |= INPUT_MASK_PD2;
     if(gpio_read_pin(GPIOD, GPIO_Pin_1) == 0) *buttons |= INPUT_MASK_PD1;
 
-    // °´¼ü (PC12,PC10)
+    // æŒ‰é”® (PC12,PC10)
     if(gpio_read_pin(GPIOC, GPIO_Pin_12) == 0) *buttons |= INPUT_MASK_PC12;
     if(gpio_read_pin(GPIOC, GPIO_Pin_10) == 0) *buttons |= INPUT_MASK_PC10;
 }

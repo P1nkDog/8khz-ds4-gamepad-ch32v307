@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/19
-* Description        : ÊÖ±úÅäÖÃÎÄ¼şºËĞÄÂß¼­
+* Description        : æ‰‹æŸ„é…ç½®æ–‡ä»¶æ ¸å¿ƒé€»è¾‘
 *********************************************************************************/
 
 #include "config.h"
@@ -14,20 +14,20 @@
 
 
 //--------------------------------------------------------------------+
-// ÅäÖÃ×éÊµÀı
+// é…ç½®ç»„å®ä¾‹
 //--------------------------------------------------------------------+
 JoystickCalibConfig g_joystickCalib;
 GamepadSettings g_gamepadSettings;
 PollingRateConfig g_pollingrate;
 
 //--------------------------------------------------------------------+
-// ¾²Ì¬»º³åÇø
+// é™æ€ç¼“å†²åŒº
 //--------------------------------------------------------------------+
 
 static uint8_t sector_buf[CONFIG_FLASH_SECTOR_SIZE];
 
 //--------------------------------------------------------------------+
-// Ä¬ÈÏÖµ
+// é»˜è®¤å€¼
 //--------------------------------------------------------------------+
 static const JoystickCalibConfig joystickCalibDefault = {
     .calib = {
@@ -47,16 +47,16 @@ static const PollingRateConfig pollingRateDefault = {
 };
 
 //--------------------------------------------------------------------+
-// »Ø±¨ÂÊ¼ä¸ôÓ³Éä
+// å›æŠ¥ç‡é—´éš”æ˜ å°„
 //--------------------------------------------------------------------+
 
 static const uint32_t polling_interval_us[] = {
-    [POLL_RATE_250]  = 4000,   // 250Hz  ¡ú 4000¦Ìs
-    [POLL_RATE_500]  = 2000,   // 500Hz  ¡ú 2000¦Ìs
-    [POLL_RATE_1000] = 1000,   // 1000Hz ¡ú 1000¦Ìs
-    [POLL_RATE_2000] = 500,    // 2000Hz ¡ú 500¦Ìs
-    [POLL_RATE_4000] = 250,    // 4000Hz ¡ú 250¦Ìs
-    [POLL_RATE_8000] = 125,    // 8000Hz ¡ú 125¦Ìs
+    [POLL_RATE_250]  = 4000,   // 250Hz  â†’ 4000Î¼s
+    [POLL_RATE_500]  = 2000,   // 500Hz  â†’ 2000Î¼s
+    [POLL_RATE_1000] = 1000,   // 1000Hz â†’ 1000Î¼s
+    [POLL_RATE_2000] = 500,    // 2000Hz â†’ 500Î¼s
+    [POLL_RATE_4000] = 250,    // 4000Hz â†’ 250Î¼s
+    [POLL_RATE_8000] = 125,    // 8000Hz â†’ 125Î¼s
 };
 
 uint32_t config_get_poll_interval_us(void) {
@@ -66,23 +66,23 @@ uint32_t config_get_poll_interval_us(void) {
 }
 
 //--------------------------------------------------------------------+
-// ×¢²á±í
+// æ³¨å†Œè¡¨
 //--------------------------------------------------------------------+
 static struct {
-    uint8_t count; // ÒÑ×¢²áÊıÁ¿
-    ConfigDesc descs[CONFIG_MAX_GROUPS]; // ÃèÊö·ûÊı×é
-    bool dirty[CONFIG_MAX_GROUPS]; // Ôà±ê¼Ç£¨true = ĞèÒª±£´æ£©
-    uint32_t active_sector; // µ±Ç°»î¶¯ÉÈÇøµØÖ·
+    uint8_t count; // å·²æ³¨å†Œæ•°é‡
+    ConfigDesc descs[CONFIG_MAX_GROUPS]; // æè¿°ç¬¦æ•°ç»„
+    bool dirty[CONFIG_MAX_GROUPS]; // è„æ ‡è®°ï¼ˆtrue = éœ€è¦ä¿å­˜ï¼‰
+    uint32_t active_sector; // å½“å‰æ´»åŠ¨æ‰‡åŒºåœ°å€
 } registry;
 
 
-// ×¢²áÒ»¸öÅäÖÃ×é
-// id: ÅäÖÃ×é±àºÅ
-// version: °æ±¾ºÅ£¨ĞŞ¸Ä½á¹¹ÌåÊ±µİÔö£©
-// size: Êı¾İ´óĞ¡
-// ram: RAM ÖĞµÄ±äÁ¿µØÖ·
-// def: Ä¬ÈÏÖµµØÖ·
-// name: Ãû³Æ£¨µ÷ÊÔÓÃ£©
+// æ³¨å†Œä¸€ä¸ªé…ç½®ç»„
+// id: é…ç½®ç»„ç¼–å·
+// version: ç‰ˆæœ¬å·ï¼ˆä¿®æ”¹ç»“æ„ä½“æ—¶é€’å¢ï¼‰
+// size: æ•°æ®å¤§å°
+// ram: RAM ä¸­çš„å˜é‡åœ°å€
+// def: é»˜è®¤å€¼åœ°å€
+// name: åç§°ï¼ˆè°ƒè¯•ç”¨ï¼‰
 static void config_register(uint16_t id, uint8_t version, uint16_t size,
                             void *ram, const void *def, const char *name){
     if (registry.count >= CONFIG_MAX_GROUPS) return;
@@ -102,7 +102,7 @@ static void config_register(uint16_t id, uint8_t version, uint16_t size,
 }
 
 //--------------------------------------------------------------------+
-// ²éÕÒ
+// æŸ¥æ‰¾
 //--------------------------------------------------------------------+
 
 static ConfigDesc* find_desc(uint16_t id){
@@ -122,10 +122,10 @@ static int find_index(uint16_t id){
 
 
 //--------------------------------------------------------------------+
-// api½Ó¿Ú
+// apiæ¥å£
 //--------------------------------------------------------------------+
 
-//ÖØÖÃÄ³¸öÅäÖÃÎªÄ¬ÈÏÖµ
+//é‡ç½®æŸä¸ªé…ç½®ä¸ºé»˜è®¤å€¼
 bool config_reset(uint16_t id){
     ConfigDesc *d = find_desc(id);
     if(!d) return false;
@@ -134,7 +134,7 @@ bool config_reset(uint16_t id){
     return true;
 }
 
-//ÖØÖÃËùÓĞÅäÖÃÎªÄ¬ÈÏÖµ
+//é‡ç½®æ‰€æœ‰é…ç½®ä¸ºé»˜è®¤å€¼
 void config_reset_all(void){
     for (int i = 0; i < registry.count; i++) {
         memcpy(registry.descs[i].ram,
@@ -144,30 +144,30 @@ void config_reset_all(void){
     }
 }
 
-//»ñµÃÅäÖÃ×éµÄÖ»¶ÁÖ¸Õë
+//è·å¾—é…ç½®ç»„çš„åªè¯»æŒ‡é’ˆ
 const void* config_get(uint16_t id){
     ConfigDesc *d = find_desc(id);
     return  d ? d->ram : NULL;
 }
 
-//»ñµÃÅäÖÃ×éµÄ¿ÉĞ´Ö¸Õë
+//è·å¾—é…ç½®ç»„çš„å¯å†™æŒ‡é’ˆ
 void* config_get_mutable(uint16_t id){
     ConfigDesc *d = find_desc(id);
     return  d ? d->ram : NULL;
 }
 
-//±ê¼ÇÄ³¸öÅäÖÃ×éÒÑĞŞ¸Ä
+//æ ‡è®°æŸä¸ªé…ç½®ç»„å·²ä¿®æ”¹
 void config_mark_dirty(uint16_t id){
     int idx = find_index(id);
     if (idx >= 0) registry.dirty[idx] = true;
 }
 
-//»ñÈ¡ÒÑ¾­×¢²áµÄÅäÖÃ×é
+//è·å–å·²ç»æ³¨å†Œçš„é…ç½®ç»„
 uint8_t config_get_count(void){
     return registry.count;
 }
 
-//»ñÈ¡ÅäÖÃ×éÃèÊö·û
+//è·å–é…ç½®ç»„æè¿°ç¬¦
 const ConfigDesc* config_get_desc(uint16_t id){
     return find_desc(id);
 }
@@ -178,10 +178,10 @@ const ConfigDesc* config_get_desc_by_index(uint8_t index){
 
 
 //--------------------------------------------------------------------+
-// flash¼ÓÔØ
+// flashåŠ è½½
 //--------------------------------------------------------------------+
 
-//ÑéÖ¤Ò»¸öÉÈÇøµÄÊı¾İÊÇ·ñÓĞĞ§
+//éªŒè¯ä¸€ä¸ªæ‰‡åŒºçš„æ•°æ®æ˜¯å¦æœ‰æ•ˆ
 static bool validate_sector(uint32_t addr){
     config_hal_read(addr, sector_buf, sizeof(sector_buf));
 
@@ -193,26 +193,26 @@ static bool validate_sector(uint32_t addr){
     return (stored == calc);
 }
 
-//´ÓÖ¸¶¨ÉÈÇø¼ÓÔØÊı¾İ
+//ä»æŒ‡å®šæ‰‡åŒºåŠ è½½æ•°æ®
 static void load_sector(uint32_t addr){
     config_hal_read(addr, sector_buf, sizeof(sector_buf));
 
     ConfigHeader *h = (ConfigHeader *)sector_buf;
     if (h->magic != CONFIG_MAGIC) return;
 
-    //±éÀúËùÓĞtlvÊı¾İ
+    //éå†æ‰€æœ‰tlvæ•°æ®
     uint32_t offset = sizeof(ConfigHeader);
     while(offset + sizeof(ConfigRecord) <= CONFIG_FLASH_SECTOR_SIZE - 4)
     {
         ConfigRecord *rec = (ConfigRecord *)(sector_buf + offset);
 
-        //Óöµ½ÖÕÖ¹·û(0x0000)Í£Ö¹
+        //é‡åˆ°ç»ˆæ­¢ç¬¦(0x0000)åœæ­¢
         if (rec->type == 0x0000) break;
 
-        //¼ÇÂ¼³¤¶ÈÒì³££¬Í£Ö¹
+        //è®°å½•é•¿åº¦å¼‚å¸¸ï¼Œåœæ­¢
         if (rec->length < sizeof(ConfigRecord) || offset + rec->length > CONFIG_FLASH_SECTOR_SIZE - 4) break;
 
-        //ÔÚÅäÖÃ±íÖĞ²éÕÒÆ¥ÅäµÄÅäÖÃ×é
+        //åœ¨é…ç½®è¡¨ä¸­æŸ¥æ‰¾åŒ¹é…çš„é…ç½®ç»„
         ConfigDesc *d = find_desc(rec->type);
         if (d && rec->version == d->version){
             uint16_t data_len = rec->length - sizeof(ConfigRecord);
@@ -225,11 +225,11 @@ static void load_sector(uint32_t addr){
 
 
 //--------------------------------------------------------------------+
-// flash±£´æ
+// flashä¿å­˜
 //--------------------------------------------------------------------+
 
 bool config_save(void){
-    //¼ì²éÊÇ·ñÓĞÔàÊı¾İ
+    //æ£€æŸ¥æ˜¯å¦æœ‰è„æ•°æ®
     bool has_dirty = false;
     for (int i = 0; i < registry.count; i++) {
         if (registry.dirty[i]){
@@ -239,16 +239,16 @@ bool config_save(void){
     }
     if(!has_dirty) return true;
 
-    //Ñ¡ÔñÄ¿±êÉÈÇø
+    //é€‰æ‹©ç›®æ ‡æ‰‡åŒº
     uint32_t target = (registry.active_sector == CONFIG_FLASH_SECTOR_A_ADDR)
                         ? CONFIG_FLASH_SECTOR_B_ADDR
                         : CONFIG_FLASH_SECTOR_A_ADDR;
     
-    //ÔÚramÖĞ¹¹½¨ÍêÕûµÄtlvÊı¾İ
+    //åœ¨ramä¸­æ„å»ºå®Œæ•´çš„tlvæ•°æ®
     memset(sector_buf, 0xFF, sizeof(sector_buf));
     uint32_t offset = 0;
 
-    //Ğ´header
+    //å†™header
     ConfigHeader header = {
         .magic = CONFIG_MAGIC,
         .version = 1,
@@ -257,7 +257,7 @@ bool config_save(void){
     memcpy(sector_buf + offset, &header, sizeof(header));
     offset += sizeof(header);
 
-    //Ğ´Ã¿¸öÅäÖÃ×éµÄrecord
+    //å†™æ¯ä¸ªé…ç½®ç»„çš„record
     for (int i = 0; i < registry.count; i++) {
         ConfigDesc *d = &registry.descs[i];
         ConfigRecord rec = {
@@ -267,7 +267,7 @@ bool config_save(void){
             .flags = 0,
         };
 
-        //¿Õ¼ä¼ì²é
+        //ç©ºé—´æ£€æŸ¥
         if (offset + rec.length > CONFIG_FLASH_SECTOR_SIZE - 4) break;
 
         memcpy(sector_buf + offset, &rec, sizeof(rec));
@@ -276,17 +276,17 @@ bool config_save(void){
         offset += d->size;
     }
     
-    //Ğ´footer
+    //å†™footer
     ConfigFooter footer = {.terminator = 0};
     memcpy(sector_buf + offset, &footer, sizeof(footer));
     offset += sizeof(footer);
 
-    //Ğ´crc
+    //å†™crc
     uint16_t crc = crc16_update(0xFFFF, sector_buf, CONFIG_FLASH_SECTOR_SIZE - 2);
     sector_buf[CONFIG_FLASH_SECTOR_SIZE - 2] = crc & 0xFF;
     sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] = crc >> 8;
 
-    //Ğ´Èëflash
+    //å†™å…¥flash
     __disable_irq();
     if(!config_hal_erase_sector(target)){
         __enable_irq();
@@ -298,12 +298,12 @@ bool config_save(void){
     }
     __enable_irq();
 
-    //»Ø¶ÁÑéÖ¤
+    //å›è¯»éªŒè¯
     if (!validate_sector(target)) {
         return false;
     }
 
-    //¸üĞÂ×´Ì¬
+    //æ›´æ–°çŠ¶æ€
     registry.active_sector = target;
     for(int i = 0; i < registry.count; i++)
     {
@@ -315,14 +315,14 @@ bool config_save(void){
 
 
 //--------------------------------------------------------------------+
-// ³õÊ¼»¯
+// åˆå§‹åŒ–
 //--------------------------------------------------------------------+
 
 void config_init(void){
     registry.count = 0;
 
-    // ×¢²áËùÓĞÅäÖÃ×é
-    // ²ÎÊı£º±àºÅ, °æ±¾, ´óĞ¡, RAMµØÖ·, Ä¬ÈÏÖµµØÖ·, Ãû³Æ
+    // æ³¨å†Œæ‰€æœ‰é…ç½®ç»„
+    // å‚æ•°ï¼šç¼–å·, ç‰ˆæœ¬, å¤§å°, RAMåœ°å€, é»˜è®¤å€¼åœ°å€, åç§°
     config_register(CONFIG_ID_JOYSTICK_CALIB, 1, sizeof(JoystickCalibConfig), 
                     &g_joystickCalib, &joystickCalibDefault, "joystick_calib");
     config_register(CONFIG_ID_GAMEPAD_SETTINGS, 1, sizeof(GamepadSettings), 
@@ -330,7 +330,7 @@ void config_init(void){
     config_register(CONFIG_ID_POLLING_RATE, 1, sizeof(PollingRateConfig),
                     &g_pollingrate, &pollingRateDefault, "polling_rate");
     
-    //´Óconfig¼ÓÔØ
+    //ä»configåŠ è½½
     bool a_ok = validate_sector(CONFIG_FLASH_SECTOR_A_ADDR);
     bool b_ok = validate_sector(CONFIG_FLASH_SECTOR_B_ADDR);
    

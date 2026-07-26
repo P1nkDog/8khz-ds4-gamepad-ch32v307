@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/07/02
-* Description        : ds4Çı¶¯½Ó¿ÚÍ·ÎÄ¼ş
+* Description        : ds4é©±åŠ¨æ¥å£å¤´æ–‡ä»¶
 *********************************************************************************/
 
 #ifndef DS4_DRIVER_H
@@ -13,7 +13,7 @@
 #include "tusb.h"
 #include "gamepad.h"
 
-// PS4 Feature Report IDs£¨²Î¿¼ GP2040-CE PS4AuthReport£©
+// PS4 Feature Report IDsï¼ˆå‚è€ƒ GP2040-CE PS4AuthReportï¼‰
 typedef enum
 {
     PS4_GET_CALIBRATION      = 0x02,    // PS4 Controller Calibration
@@ -39,18 +39,18 @@ typedef enum
 //    24 byte  - zero padding
 
 
-// ³õÊ¼»¯
+// åˆå§‹åŒ–
 void ds4_driver_init(void);
 
-// Ö÷Ñ­»·´¦Àí£¨²Î¿¼ PS4Driver::process£©
+// ä¸»å¾ªç¯å¤„ç†ï¼ˆå‚è€ƒ PS4Driver::processï¼‰
 void ds4_process(const GamepadState *state);
 
-// TinyUSB ÃèÊö·û»Øµ÷
+// TinyUSB æè¿°ç¬¦å›è°ƒ
 uint8_t const *tud_descriptor_device_cb(void);
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index);
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid); 
 
-// TinyUSB HID »Øµ÷
+// TinyUSB HID å›è°ƒ
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance);
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
                                 hid_report_type_t report_type,
@@ -59,7 +59,7 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                             hid_report_type_t report_type,
                             uint8_t const* buffer, uint16_t bufsize);
 
-// ÊÖ±úÊı¾İ·¢ËÍ
+// æ‰‹æŸ„æ•°æ®å‘é€
 void ds4_send_report(PS4Report *report);
 
 
