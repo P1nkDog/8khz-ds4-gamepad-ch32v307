@@ -46,9 +46,9 @@ void ds4_driver_init(void);
 void ds4_process(const GamepadState *state);
 
 // TinyUSB 描述符回调
-uint8_t const *tud_descriptor_device_cb(void);
-uint8_t const *tud_descriptor_configuration_cb(uint8_t index);
-uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid); 
+// uint8_t const *tud_descriptor_device_cb(void);
+// uint8_t const *tud_descriptor_configuration_cb(uint8_t index);
+// uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid); 
 
 // TinyUSB HID 回调
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance);

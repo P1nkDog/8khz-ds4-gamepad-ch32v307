@@ -129,9 +129,9 @@ static const uint8_t ps4_output_0xf3[] = {
 // 设备描述符回调
 //--------------------------------------------------------------------+
 
-uint8_t const *tud_descriptor_device_cb(void) {
-    return ps4_device_descriptor;  
-}
+// uint8_t const *tud_descriptor_device_cb(void) {
+//     return ps4_device_descriptor;  
+// }
 
 //--------------------------------------------------------------------+
 // 配置描述符回调
@@ -140,10 +140,10 @@ uint8_t const *tud_descriptor_device_cb(void) {
 // Invoked when received GET CONFIGURATION DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
-uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
-  (void)index; // for multiple configurations
-  return ps4_configuration_descriptor;
-}
+// uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
+//   (void)index; // for multiple configurations
+//   return ps4_configuration_descriptor;
+// }
 
 
 //--------------------------------------------------------------------+
@@ -151,67 +151,67 @@ uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
 //--------------------------------------------------------------------+
 
 // String Descriptor Index
-enum {
-  STRID_LANGID = 0,
-  STRID_MANUFACTURER,
-  STRID_PRODUCT,
-  STRID_SERIAL,
-};
+// enum {
+//   STRID_LANGID = 0,
+//   STRID_MANUFACTURER,
+//   STRID_PRODUCT,
+//   STRID_SERIAL,
+// };
 
 // array of pointer to string descriptors
-static char const *string_desc_arr[] = {
-    (const char *)ps4_string_language,
-    (const char *)ps4_string_manufacturer,
-    (const char *)ps4_string_product,
-    NULL,
-};
+// static char const *string_desc_arr[] = {
+//     (const char *)ps4_string_language,
+//     (const char *)ps4_string_manufacturer,
+//     (const char *)ps4_string_product,
+//     NULL,
+// };
 
-static uint16_t _desc_str[32 + 1];
+// static uint16_t _desc_str[32 + 1];
 
 // Invoked when received GET STRING DESCRIPTOR request
 // Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
-uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
-  (void)langid;
-  size_t chr_count;
+// uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+//   (void)langid;
+//   size_t chr_count;
 
-  switch (index) {
-    case STRID_LANGID:
-      memcpy(&_desc_str[1], string_desc_arr[0], 2);
-      chr_count = 1;
-      break;
+//   switch (index) {
+//     case STRID_LANGID:
+//       memcpy(&_desc_str[1], string_desc_arr[0], 2);
+//       chr_count = 1;
+//       break;
 
-    case STRID_SERIAL: chr_count = board_usb_get_serial(_desc_str + 1, 32); break;
+//     case STRID_SERIAL: chr_count = board_usb_get_serial(_desc_str + 1, 32); break;
 
-    default:
-      // Note: the 0xEE index string is a Microsoft OS 1.0 Descriptors.
-      // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-defined-usb-descriptors
+//     default:
+//       // Note: the 0xEE index string is a Microsoft OS 1.0 Descriptors.
+//       // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-defined-usb-descriptors
 
-      if (!(index < sizeof(string_desc_arr) / sizeof(string_desc_arr[0]))) {
-        return NULL;
-      }
+//       if (!(index < sizeof(string_desc_arr) / sizeof(string_desc_arr[0]))) {
+//         return NULL;
+//       }
 
-      const char *str = string_desc_arr[index];
+//       const char *str = string_desc_arr[index];
 
-      // Cap at max char
-      chr_count = strlen(str);
+//       // Cap at max char
+//       chr_count = strlen(str);
 
-      size_t const max_count = sizeof(_desc_str) / sizeof(_desc_str[0]) - 1; // -1 for string type
-      if (chr_count > max_count) {
-        chr_count = max_count;
-      }
+//       size_t const max_count = sizeof(_desc_str) / sizeof(_desc_str[0]) - 1; // -1 for string type
+//       if (chr_count > max_count) {
+//         chr_count = max_count;
+//       }
 
-      // Convert ASCII string into UTF-16
-      for (size_t i = 0; i < chr_count; i++) {
-        _desc_str[1 + i] = str[i];
-      }
-      break;
-  }
+//       // Convert ASCII string into UTF-16
+//       for (size_t i = 0; i < chr_count; i++) {
+//         _desc_str[1 + i] = str[i];
+//       }
+//       break;
+//   }
 
   // first byte is length (including header), second byte is string type
-  _desc_str[0] = (uint16_t)((TUSB_DESC_STRING << 8) | (2 * chr_count + 2));
+//   _desc_str[0] = (uint16_t)((TUSB_DESC_STRING << 8) | (2 * chr_count + 2));
 
-  return _desc_str;
-}
+//   return _desc_str;
+// }
 
 //--------------------------------------------------------------------+
 // HID 报告描述符

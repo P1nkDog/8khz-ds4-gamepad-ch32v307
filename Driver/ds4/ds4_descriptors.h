@@ -412,9 +412,12 @@ typedef struct __attribute__((packed)) {
     };
 } PS4Report;
 
+//--------------------------------------------------------------------+
+// 字符串描述符
+//--------------------------------------------------------------------+
 static const uint8_t ps4_string_language[]     = { 0x09, 0x04 };
 static const uint8_t ps4_string_manufacturer[] = "P1nk";
-static const uint8_t ps4_string_product[]      = "WCH_DS4";
+static const uint8_t ps4_string_product[]      = "P1nk_DS4";
 static const uint8_t ps4_string_version[]      = "0.1";
 
 static const uint8_t *ps4_string_descriptors[] __attribute__((unused)) =
