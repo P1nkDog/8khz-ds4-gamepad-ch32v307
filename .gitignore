@@ -6,6 +6,4 @@ Docs/
 
 # 工具配置
 CLAUDE.md
-.template
-*.wvproj
 .mrs/
