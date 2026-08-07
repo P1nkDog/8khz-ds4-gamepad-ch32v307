@@ -239,10 +239,6 @@ bool config_save(void){
     }
     if(!has_dirty) return true;
 
-    //选择目标扇区
-    uint32_t target = (registry.active_sector == CONFIG_FLASH_SECTOR_A_ADDR)
-                        ? CONFIG_FLASH_SECTOR_B_ADDR
-                        : CONFIG_FLASH_SECTOR_A_ADDR;
     
     //在ram中构建完整的tlv数据
     memset(sector_buf, 0xFF, sizeof(sector_buf));
@@ -286,25 +282,40 @@ bool config_save(void){
     sector_buf[CONFIG_FLASH_SECTOR_SIZE - 2] = crc & 0xFF;
     sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] = crc >> 8;
 
-    //写入flash
+    //【改动】先写暂存扇区 B，校验通过后再覆盖主扇区 A
+
+    //第1步：写 B（暂存）
     __disable_irq();
-    if(!config_hal_erase_sector(target)){
+    if(!config_hal_erase_sector(CONFIG_FLASH_SECTOR_B_ADDR)){
         __enable_irq();
         return false;
-    } 
-    if(!config_hal_write(target, sector_buf, sizeof(sector_buf))){
+    }
+    if(!config_hal_write(CONFIG_FLASH_SECTOR_B_ADDR, sector_buf, sizeof(sector_buf))){
         __enable_irq();
         return false;
     }
     __enable_irq();
-
-    //回读验证
-    if (!validate_sector(target)) {
+    if (!validate_sector(CONFIG_FLASH_SECTOR_B_ADDR)) {
         return false;
     }
 
-    //更新状态
-    registry.active_sector = target;
+    //第2步：用同一份 buffer 覆盖 A（提交，A 永远是主读扇区）
+    __disable_irq();
+    if(!config_hal_erase_sector(CONFIG_FLASH_SECTOR_A_ADDR)){
+        __enable_irq();
+        return false;
+    }
+    if(!config_hal_write(CONFIG_FLASH_SECTOR_A_ADDR, sector_buf, sizeof(sector_buf))){
+        __enable_irq();
+        return false;
+    }
+    __enable_irq();
+    if (!validate_sector(CONFIG_FLASH_SECTOR_A_ADDR)) {
+        return false;
+    }
+
+    //更新状态：A 始终为主读扇区
+    registry.active_sector = CONFIG_FLASH_SECTOR_A_ADDR;
     for(int i = 0; i < registry.count; i++)
     {
         registry.dirty[i] =false; 
