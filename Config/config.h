@@ -34,7 +34,6 @@ typedef struct{
 //手柄设置
 typedef struct{
     uint16_t deadzone;
-
 } GamepadSettings;
 
 //回报率设置

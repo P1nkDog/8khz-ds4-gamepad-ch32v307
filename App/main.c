@@ -15,6 +15,7 @@
 #include "gamepad.h"
 #include "cdc_driver.h"
 #include "config.h"
+#include "joystick.h"
 #include "us_timer.h"
 
 
@@ -45,10 +46,8 @@ int main(void)
     printf("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
     printf("Mode: %s\r\n", current_mode == USB_MODE_HID ? "HID" : "CDC");
 
-    if (current_mode == USB_MODE_HID) {
-        gamepad_init();
-    }
-
+    gamepad_init();
+    
     uint32_t send_interval_us = config_get_poll_interval_us();
     uint32_t last_send_us = 0;
 
@@ -65,6 +64,7 @@ int main(void)
             }
         } else {
             cdc_process();
+            joystick_process();
         }
     }
 }

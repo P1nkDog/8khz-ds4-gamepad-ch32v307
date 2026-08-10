@@ -40,6 +40,14 @@
 #define MSP_CMD_CONFIG_RESET    0x13
 #define MSP_CMD_CONFIG_STATUS   0x14
 
+//摇杆校准命令
+#define MSP_CMD_JOYSTICK_RAW    0x15
+#define MSP_CMD_CALIB_START     0x16
+#define MSP_CMD_CALIB_SAMPLE    0x17
+#define MSP_CMD_CALIB_TRACK     0x18
+#define MSP_CMD_CALIB_END       0x19
+#define MSP_CMD_CALIB_CANCEL    0x1A
+
 //--------------------------------------------------------------------+
 // 状态码
 //--------------------------------------------------------------------+

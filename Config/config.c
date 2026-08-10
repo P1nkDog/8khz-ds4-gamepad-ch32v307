@@ -39,7 +39,7 @@ static const JoystickCalibConfig joystickCalibDefault = {
 };
 
 static const GamepadSettings gamepadSettingsDefault = {
-    .deadzone = 3,
+    .deadzone = 1,
 };
 
 static const PollingRateConfig pollingRateDefault = {

@@ -8,12 +8,14 @@
 
 #include "gamepad.h"
 #include "input.h"
+#include "joystick.h"
 #include <string.h>
 
 static GamepadState state; 
 
 void gamepad_init(){
     input_init();
+    joystick_init();
     memset(&state,0,sizeof(state));
     state.dpad = GAMEPAD_HAT_NOTHING;
 }
@@ -43,15 +45,16 @@ uint8_t gamepad_dpad_map(uint32_t btn){
 void gamepad_process(){
 
     uint32_t btn;
-    JoystickData joy;
+    const JoystickOutput *joy;
 
-    input_read_joystick(&joy);
+    joystick_process();
     input_read_buttons(&btn);
 
-    state.lx = 4095 - joy .lx;
-    state.ly = joy .ly;
-    state.rx = 4095 - joy .rx;
-    state.ry = joy .ry;
+    joy = joystick_get_output();
+    state.lx = joy->lx;
+    state.ly = joy->ly;
+    state.rx = joy->rx;
+    state.ry = joy->ry;
 
     state.buttonWest         = (btn & INPUT_MASK_PE2) ? 1 : 0;
     state.buttonSouth        = (btn & INPUT_MASK_PE1) ? 1 : 0;

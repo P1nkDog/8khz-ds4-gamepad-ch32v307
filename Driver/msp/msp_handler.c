@@ -11,6 +11,7 @@
 #include "msp_protocol.h"
 #include "msp_handler.h"
 #include "config.h"
+#include "joystick.h"
 #include "ch32v30x.h"
 
 //--------------------------------------------------------------------+
@@ -220,6 +221,86 @@ static void msp_handle_config_status(void) {
     msp_send_reply(MSP_CMD_CONFIG_STATUS, resp, pos);
 }
 
+
+//--------------------------------------------------------------------+
+// 命令处理：校准命令
+//--------------------------------------------------------------------+
+
+//处理 MSP_CMD_JOYSTICK_RAW：返回 4轴逻辑原始 + 4轴映射后 各u16 LE
+static void msp_handle_joystick_raw(void){
+    uint8_t resp[17];
+    const uint16_t *raw = joystick_get_raw();
+    const JoystickOutput *out = joystick_get_output();
+    uint16_t out_arr[4] = {out->lx, out->ly, out->rx, out->ry};
+
+    resp[0] = 4;   //轴数量
+    uint8_t pos = 1;
+    for(uint8_t i = 0; i < 4; i++){
+        resp[pos++] = (uint8_t)(raw[i] & 0xFF);
+        resp[pos++] = (uint8_t)(raw[i] >> 8);
+    }
+    for(uint8_t i = 0; i < 4; i++){
+        resp[pos++] = (uint8_t)(out_arr[i] & 0xFF);
+        resp[pos++] = (uint8_t)(out_arr[i] >> 8);
+    }
+    msp_send_reply(MSP_CMD_JOYSTICK_RAW, resp, pos);
+}
+
+//处理 MSP_CMD_CALIB_START
+static void msp_handle_calib_start(void){
+    joystick_calib_start();
+    uint8_t status = MSP_STATUS_OK;
+    msp_send_reply(MSP_CMD_CALIB_START, &status, 1);
+}
+
+//处理 MSP_CMD_CALIB_SAMPLE：采样中心，返回4轴center
+static void msp_handle_calib_sample(void){
+    joystick_calib_sample_center();
+    const JoystickCalibConfig *calib = (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
+    uint8_t resp[9];
+    resp[0] = 4;   //轴数量
+    for(uint8_t i = 0; i < 4; i++){
+        resp[1 + i*2] = (uint8_t)(calib->calib[i].center & 0xFF);
+        resp[2 + i*2] = (uint8_t)(calib->calib[i].center >> 8);
+    }
+    msp_send_reply(MSP_CMD_CALIB_SAMPLE, resp, sizeof(resp));
+}
+
+//处理 MSP_CMD_CALIB_TRACK：开始跟踪min/max
+static void msp_handle_calib_track(void){
+    joystick_calib_track_start();
+    uint8_t status = MSP_STATUS_OK;
+    msp_send_reply(MSP_CMD_CALIB_TRACK, &status, 1);
+}
+
+//处理 MSP_CMD_CALIB_END：结束跟踪并保存，返回4轴min/center/max + 状态
+static void msp_handle_calib_end(void){
+    if(!joystick_calib_track_end()){
+        msp_send_error(MSP_CMD_CALIB_END, MSP_STATUS_ERROR);
+        return;
+    }
+    const JoystickCalibConfig *calib = (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
+    uint8_t resp[26];
+    resp[0] = MSP_STATUS_OK;
+    resp[1] = 4;   //轴数量
+    for(uint8_t i = 0; i < 4; i++){
+        uint16_t v[3] = {calib->calib[i].min, calib->calib[i].center, calib->calib[i].max};
+        for(uint8_t j = 0; j < 3; j++){
+            resp[2 + i*6 + j*2]     = (uint8_t)(v[j] & 0xFF);
+            resp[2 + i*6 + j*2 + 1] = (uint8_t)(v[j] >> 8);
+        }
+    }
+    msp_send_reply(MSP_CMD_CALIB_END, resp, sizeof(resp));
+}
+
+//处理 MSP_CMD_CALIB_CANCEL：放弃校准
+static void msp_handle_calib_cancel(void){
+    joystick_calib_cancel();
+    uint8_t status = MSP_STATUS_OK;
+    msp_send_reply(MSP_CMD_CALIB_CANCEL, &status, 1);
+}
+
+
 //--------------------------------------------------------------------+
 // 命令分发
 //--------------------------------------------------------------------+
@@ -234,6 +315,12 @@ static void msp_dispatch(uint8_t cmd, const uint8_t *payload, uint8_t len) {
         case MSP_CMD_CONFIG_SAVE:   msp_handle_config_save(); break;
         case MSP_CMD_CONFIG_RESET:  msp_handle_config_reset(payload, len); break;
         case MSP_CMD_CONFIG_STATUS: msp_handle_config_status(); break;
+        case MSP_CMD_JOYSTICK_RAW:  msp_handle_joystick_raw(); break;
+        case MSP_CMD_CALIB_START:   msp_handle_calib_start(); break;
+        case MSP_CMD_CALIB_SAMPLE:  msp_handle_calib_sample(); break;
+        case MSP_CMD_CALIB_TRACK:   msp_handle_calib_track(); break;
+        case MSP_CMD_CALIB_END:     msp_handle_calib_end(); break;
+        case MSP_CMD_CALIB_CANCEL:  msp_handle_calib_cancel(); break;
         default: msp_send_error(cmd, MSP_STATUS_ERROR); break;
     }
 }
