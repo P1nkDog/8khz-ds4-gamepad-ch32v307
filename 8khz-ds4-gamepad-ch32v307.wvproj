@@ -28,7 +28,7 @@
 				"name": "*.wvproj"
 			}
 		],
-		"projectName": "CH32V307VCT_tinyusb_ds4_A",
+		"projectName": "8khz-ds4-gamepad-ch32v307",
 		"architecture": "RISC-V",
 		"projectType": "c"
 	},
@@ -385,7 +385,7 @@
 	"flashConfig": {
 		"mcutype": "CH32V30x",
 		"address": "0x08000000",
-		"target_path": "obj/CH32V307VCT_tinyusb_ds4_A.hex",
+		"target_path": "obj/8khz-ds4-gamepad-ch32v307.hex",
 		"clkSpeed": "High",
 		"debug_interface_mode": "1-wire serial",
 		"erase": true,
@@ -466,8 +466,8 @@
 			"showDebugOutputTimestamps": true
 		},
 		"reserve": {
-			"PROGRAM_NAME": "obj/CH32V307VCT_tinyusb_ds4_A.elf",
-			"PROJECT_ATTR": "CH32V307VCT_tinyusb_ds4_A",
+			"PROGRAM_NAME": "obj/8khz-ds4-gamepad-ch32v307.elf",
+			"PROJECT_ATTR": "8khz-ds4-gamepad-ch32v307",
 			"PROJECT_BUILD_CONFIG_AUTO_ATTR": true,
 			"PROJECT_BUILD_CONFIG_ID_ATTR": "",
 			"ATTR_BUILD_BEFORE_LAUNCH_ATTR": 2,
