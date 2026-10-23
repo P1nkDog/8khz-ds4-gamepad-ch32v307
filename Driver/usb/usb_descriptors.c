@@ -20,24 +20,24 @@
 UsbMode current_mode = USB_MODE_HID;
 
 //--------------------------------------------------------------------+
-// 初始化：读取 PD7 按键，决定工作模式
+// 初始化：读取 PB12（Select / SW2）按键，决定工作模式
 //--------------------------------------------------------------------+
 void usb_desc_init(void) {
     GPIO_InitTypeDef GPIO_InitStructure = {0};
 
-    // 使能 GPIOD 时钟
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD, ENABLE);
+    // 使能 GPIOB 时钟
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
 
-    // 配置 PD7 为上拉输入
-    GPIO_InitStructure.GPIO_Pin  = GPIO_Pin_7;
+    // 配置 PB12 为上拉输入
+    GPIO_InitStructure.GPIO_Pin  = GPIO_Pin_12;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
-    GPIO_Init(GPIOD, &GPIO_InitStructure);
+    GPIO_Init(GPIOB, &GPIO_InitStructure);
 
     // 等待上拉电阻将引脚拉高（烧录后引脚浮空，需要时间稳定）
     Delay_Ms(10);
 
     // 读取按键状态：低电平 = 按下 = CDC 模式
-    if (GPIO_ReadInputDataBit(GPIOD, GPIO_Pin_7) == Bit_RESET) {
+    if (GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_12) == Bit_RESET) {
         current_mode = USB_MODE_CDC;
     } else {
         current_mode = USB_MODE_HID;
