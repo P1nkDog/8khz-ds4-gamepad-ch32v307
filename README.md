@@ -2,7 +2,7 @@
 
 > A complete PS4 DualShock 4 gamepad solution with 8000Hz polling rate: Firmware + PCB + Web Configurator
 
-[中文版](README_CN.md)
+[中文](./README.zh-CN.md)
 
 ---
 
