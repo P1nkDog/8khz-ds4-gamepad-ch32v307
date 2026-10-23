@@ -88,7 +88,7 @@ static void msp_handle_api_version(void) {
 
 //处理 MSP_CMD_FC_VARIANT
 static void msp_handle_fc_variant(void) {
-    msp_send_reply(MSP_CMD_FC_VARIANT, (const uint8_t *)MSP_FC_VARIANT_STR, 4);
+    msp_send_reply(MSP_CMD_FC_VARIANT, (const uint8_t *)MSP_FC_VARIANT_STR, (uint8_t)(sizeof(MSP_FC_VARIANT_STR) - 1));
 }
 
 //处理 MSP_CMD_FC_VERSION

@@ -73,12 +73,12 @@ typedef enum {
 //--------------------------------------------------------------------+
 // MSP 版本信息
 //--------------------------------------------------------------------+
-#define MSP_VERSION_MAJOR   1
-#define MSP_VERSION_MINOR   0
+#define MSP_VERSION_MAJOR   0
+#define MSP_VERSION_MINOR   1
 
-#define MSP_FC_VARIANT_STR  "DS4P"
-#define MSP_FC_VERSION_MAJOR 1
-#define MSP_FC_VERSION_MINOR 0
+#define MSP_FC_VARIANT_STR  "P1NKD-DS4"
+#define MSP_FC_VERSION_MAJOR 0
+#define MSP_FC_VERSION_MINOR 1
 #define MSP_FC_VERSION_PATCH 0
 
 //--------------------------------------------------------------------+
