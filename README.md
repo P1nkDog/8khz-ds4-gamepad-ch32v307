@@ -91,10 +91,10 @@ All three Gerber packages are identical in structure, 16 files each: copper (GTL
 ### Prerequisites
 
 - **MounRiver Studio (MRS) 2.5.0** or newer, which bundles `riscv-none-embed-gcc`
-- Fetch the submodule after cloning (TinyUSB is a git submodule; the build fails without it):
+- Clone the sources (TinyUSB is a submodule, so `--recursive` is required):
 
   ```bash
-  git submodule update --init --recursive
+  git clone --recursive https://github.com/P1nkDog/8khz-ds4-gamepad-ch32v307.git
   ```
 
 - For flashing, either a **WCH-Link** (download straight from MRS) or **any USB cable plus the web flasher**

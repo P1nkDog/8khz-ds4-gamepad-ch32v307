@@ -91,10 +91,10 @@
 ### 前置条件
 
 - **MounRiver Studio（MRS）2.5.0** 或更新版本，自带 `riscv-none-embed-gcc`
-- 首次 clone 后拉取子模块（TinyUSB 是 submodule，不拉会导致编译失败）：
+- 克隆源码（TinyUSB 是子模块，必须带 `--recursive` 一并拉取）：
 
   ```bash
-  git submodule update --init --recursive
+  git clone --recursive https://github.com/P1nkDog/8khz-ds4-gamepad-ch32v307.git
   ```
 
 - 烧录二选一：**WCH-Link**（MRS 里直接 Download）或**任意 USB 线 + 网页烧录**
