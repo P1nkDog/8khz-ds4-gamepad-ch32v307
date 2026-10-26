@@ -40,8 +40,8 @@
 |---|---|---|
 | 左摇杆 X | PC4 | ADC14 |
 | 左摇杆 Y | PC5 | ADC15 |
-| 右摇杆 X | PA6 | ADC6 |
-| 右摇杆 Y | PA7 | ADC7 |
+| 右摇杆 X | PA7 | ADC7 |
+| 右摇杆 Y | PA6 | ADC6 |
 
 **按键（低电平有效，内部上拉）**
 
@@ -83,6 +83,8 @@
 | `panel.zip` | 拼板（panel）Gerber——多块板拼在一起打样时用 |
 
 三个 Gerber 包内容一致，各 16 个文件：铜层（GTL/GBL）、丝印（GTO/GBO）、阻焊（GTS/GBS）、钢网（GTP/GBP）、板框（GKO）、钻孔图（GDL/GDD）、PTH/NPTH/过孔钻孔（DRL）、飞针测试文件，并附 `PCB下单必读.txt`——**直接整包上传打板厂即可下单**。
+
+**需要注意的是，v0.1.0版本的PCB使用的是DS5版本的摇杆，板厚应为1.2mm**
 
 > 目前没有 BOM 和贴片坐标文件，要整板 SMT 贴片需要另外导出。
 
@@ -290,5 +292,5 @@ Config ── 三个配置组 + TLV 序列化 + CRC16 + 双扇区交替（0x0804
 ## 致谢
 
 - [TinyUSB](https://github.com/hathach/tinyusb) —— USB 协议栈，设备类、端点管理与 WCH 移植层都来自它
-- 沁恒微电子（WCH）—— CH32V307 芯片、标准外设库与官方例程
+- 沁恒微电子（WCH）—— [CH32V307 芯片、标准外设库与官方例程](https://www.wch.cn/products/CH32V307.html)
 - [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE)、[Betaflight](https://github.com/betaflight/betaflight) —— 按键布局与配置系统的思路来源

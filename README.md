@@ -40,8 +40,8 @@ English | [中文](./README.zh-CN.md)
 |---|---|---|
 | Left stick X | PC4 | ADC14 |
 | Left stick Y | PC5 | ADC15 |
-| Right stick X | PA6 | ADC6 |
-| Right stick Y | PA7 | ADC7 |
+| Right stick X | PA7 | ADC7 |
+| Right stick Y | PA6 | ADC6 |
 
 **Buttons (active low, internal pull-up)**
 
@@ -83,6 +83,8 @@ Hardware files live in per-version folders; the current one is [`PCB/v0.1.0/`](.
 | `panel.zip` | Panelised Gerber — for fabricating several boards in one panel |
 
 All three Gerber packages are identical in structure, 16 files each: copper (GTL/GBL), silkscreen (GTO/GBO), solder mask (GTS/GBS), paste (GTP/GBP), board outline (GKO), drill drawing (GDL/GDD), PTH/NPTH/via drill files (DRL) and a flying-probe test file, plus a `PCB下单必读.txt` note — **upload the whole package to a PCB house and it is ready to order**.
+
+**Note that the v0.1.0 PCB uses the DS5 version of the analog stick module, and the board thickness should be 1.2 mm.**
 
 > BOM and pick-and-place files are not included; export them separately if you want full SMT assembly.
 
@@ -290,5 +292,5 @@ Physical button → DS4 field, hard-coded in `Driver/gamepad/gamepad.c`:
 ## Acknowledgements
 
 - [TinyUSB](https://github.com/hathach/tinyusb) — the USB stack; device classes, endpoint management and the WCH port layer all come from it
-- WCH (沁恒微电子) — the CH32V307 chip, the standard peripheral library and official examples
+- WCH (沁恒微电子) — the [CH32V307 chip, the standard peripheral library and official examples](https://www.wch.cn/products/CH32V307.html)
 - [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE), [Betaflight](https://github.com/betaflight/betaflight) — sources of inspiration for the button layout and configuration system
