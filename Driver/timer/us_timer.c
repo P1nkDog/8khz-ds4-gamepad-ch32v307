@@ -35,9 +35,19 @@ void us_timer_init(void){
     //使能tim2时钟
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
 
+    //按时钟树计算预分频：TIM2 时钟 = PCLK1 × (APB1 分频≠1 时 ×2)
+    RCC_ClocksTypeDef clks;
+    RCC_GetClocksFreq(&clks);
+    uint32_t tim_clk = (clks.HCLK_Frequency == clks.PCLK1_Frequency)
+                     ? clks.PCLK1_Frequency
+                     : (clks.PCLK1_Frequency * 2u);
+    uint32_t psc = tim_clk / 1000000u;
+    if (psc == 0u)    psc = 1u;         //保护：时钟低于 1MHz
+    if (psc > 65536u) psc = 65536u;
+
     //定时器基础配置
     TIM_TimeBaseStructure.TIM_Period = 0xFFFF;
-    TIM_TimeBaseStructure.TIM_Prescaler = 143;
+    TIM_TimeBaseStructure.TIM_Prescaler = (uint16_t)(psc - 1u);
     TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
     TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
@@ -65,14 +75,24 @@ void us_timer_init(void){
 // 读取当前时间
 //--------------------------------------------------------------------+
 uint32_t micros(void){
+    uint32_t primask;
     uint32_t overflow;
-    uint16_t cnt;
+    uint32_t cnt;
 
-    //读取两次确保一致
-    do{
-        overflow = tim2_overflow_count;
-        cnt = TIM_GetCounter(TIM2);
-    }while(overflow != tim2_overflow_count);
+    //关总中断，保证 overflow 与计数器取自同一时刻
+    __asm volatile ("csrrc %0, 0x800, %1" : "=r"(primask) : "r"(0x88u) : "memory");
+
+    overflow = tim2_overflow_count;
+    cnt      = TIM_GetCounter(TIM2);
+
+    //硬件已溢出、但 TIM2 中断被挡住还没执行：计数值已回绕到小值，
+    //而 overflow 仍是旧的。此时 UIF 一定置位，据此补 1。
+    if ((TIM_GetFlagStatus(TIM2, TIM_FLAG_Update) != RESET) && (cnt < 0x8000u)) {
+        overflow++;
+    }
+
+    //按原状态恢复中断（原来关着就保持关）
+    __asm volatile ("csrs 0x800, %0" : : "r"(primask & 0x88u) : "memory");
 
     return (overflow << 16) | cnt;
 }

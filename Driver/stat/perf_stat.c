@@ -3,7 +3,7 @@
 * Author             : P1nkDog
 * Version            : V1.0.0
 * Date               : 2026/10/26
-* Description        : ´úÂë¶ÎºÄÊ±Í³¼ÆÊµÏÖ£¨PERF_STAT_ENABLE=0 Ê±±¾ÎÄ¼þÎª¿Õ£©
+* Description        : ä»£ç æ®µè€—æ—¶ç»Ÿè®¡å®žçŽ°ï¼ˆPERF_STAT_ENABLE=0 æ—¶æœ¬æ–‡ä»¶ä¸ºç©ºï¼‰
 *********************************************************************************/
 
 #include "perf_stat.h"
@@ -14,24 +14,24 @@
 #include "us_timer.h"       //micros
 
 //--------------------------------------------------------------------+
-// ¾²Ì¬ÅäÖÃ
+// é™æ€é…ç½®
 //--------------------------------------------------------------------+
-#define STAT_WINDOW_US      1000000u        //1 ÃëÊä³öÒ»´Î
-#define STAT_MIN_INVALID    0xFFFFFFFFu     //min µÄ"ÉÐÎÞÑù±¾"±ê¼Ç
+#define STAT_WINDOW_US      1000000u        //1 ç§’è¾“å‡ºä¸€æ¬¡
+#define STAT_MIN_INVALID    0xFFFFFFFFu     //min çš„"å°šæ— æ ·æœ¬"æ ‡è®°
 
 //--------------------------------------------------------------------+
-// Í³¼Æ×´Ì¬£¨µ±Ç°´°¿Ú£©
+// ç»Ÿè®¡çŠ¶æ€ï¼ˆå½“å‰çª—å£ï¼‰
 //--------------------------------------------------------------------+
-static uint32_t s_t0;               //±¾¶ÎÆðµã
-static uint32_t s_max;              //´°¿ÚÄÚ×î³¤
-static uint32_t s_min;              //´°¿ÚÄÚ×î¶Ì
-static uint32_t s_sum;              //´°¿ÚÄÚÀÛ¼Æ
-static uint32_t s_cnt;              //´°¿ÚÄÚ´ÎÊý
-static uint32_t s_win_start;        //´°¿ÚÆðµã
-static uint32_t s_aux_last;         //ÉÏ´ÎÊä³öµÄ¸½Êô¼ÆÊý
+static uint32_t s_t0;               //æœ¬æ®µèµ·ç‚¹
+static uint32_t s_max;              //çª—å£å†…æœ€é•¿
+static uint32_t s_min;              //çª—å£å†…æœ€çŸ­
+static uint32_t s_sum;              //çª—å£å†…ç´¯è®¡
+static uint32_t s_cnt;              //çª—å£å†…æ¬¡æ•°
+static uint32_t s_win_start;        //çª—å£èµ·ç‚¹
+static uint32_t s_aux_last;         //ä¸Šæ¬¡è¾“å‡ºçš„é™„å±žè®¡æ•°
 
 //--------------------------------------------------------------------+
-// ¹«¹²½Ó¿Ú
+// å…¬å…±æŽ¥å£
 //--------------------------------------------------------------------+
 
 void perf_stat_reset(void)
@@ -54,7 +54,7 @@ void perf_stat_begin(void)
 
 void perf_stat_end(void)
 {
-    uint32_t dt = micros() - s_t0;      //uint32 ÎÞ·ûºÅÏà¼õ£¬¿ç»ØÈÆÈÔÕýÈ·
+    uint32_t dt = micros() - s_t0;      //uint32 æ— ç¬¦å·ç›¸å‡ï¼Œè·¨å›žç»•ä»æ­£ç¡®
 
     if (dt > s_max) s_max = dt;
     if (dt < s_min) s_min = dt;
@@ -64,13 +64,13 @@ void perf_stat_end(void)
 
 void perf_stat_dump_if(bool cond, uint32_t aux_counter)
 {
-    //cond ÓÉµ÷ÓÃ·½¸ø³ö£¨ÀýÈç"Î´¹ÒÔØ"£©£¬±¾Ä£¿é²»ÅÐ¶ÏÈÎºÎÍâ²¿×´Ì¬
+    //cond ç”±è°ƒç”¨æ–¹ç»™å‡ºï¼ˆä¾‹å¦‚"æœªæŒ‚è½½"ï¼‰ï¼Œæœ¬æ¨¡å—ä¸åˆ¤æ–­ä»»ä½•å¤–éƒ¨çŠ¶æ€
     if (!cond) return;
 
     uint32_t now = micros();
     if ((now - s_win_start) < STAT_WINDOW_US) return;
 
-    //¸³ now ¶ø²»ÊÇÀÛ¼Ó´°¿Ú£¬±ÜÃâ´òÓ¡ºÄÊ±±»¼ÆÈëÏÂÒ»ÖÜÆÚºóÁ¬Ðø²¹´ò
+    //èµ‹ now è€Œä¸æ˜¯ç´¯åŠ çª—å£ï¼Œé¿å…æ‰“å°è€—æ—¶è¢«è®¡å…¥ä¸‹ä¸€å‘¨æœŸåŽè¿žç»­è¡¥æ‰“
     s_win_start = now;
 
     uint32_t avg = (s_cnt != 0u) ? (s_sum / s_cnt) : 0u;
@@ -85,7 +85,7 @@ void perf_stat_dump_if(bool cond, uint32_t aux_counter)
            (unsigned long)s_cnt,
            (unsigned long)aux);
 
-    //ÖØÖÃ´°¿Ú
+    //é‡ç½®çª—å£
     s_max = 0;
     s_min = STAT_MIN_INVALID;
     s_sum = 0;
@@ -94,7 +94,7 @@ void perf_stat_dump_if(bool cond, uint32_t aux_counter)
 
 #else
 
-//¹Ø±ÕÊ±±£³Ö·­Òëµ¥Ôª·Ç¿Õ£¬±ÜÃâ -Wpedantic ÏÂµÄ¿ÕÎÄ¼þ¸æ¾¯
+//å…³é—­æ—¶ä¿æŒç¿»è¯‘å•å…ƒéžç©ºï¼Œé¿å… -Wpedantic ä¸‹çš„ç©ºæ–‡ä»¶å‘Šè­¦
 typedef int perf_stat_disabled_t;
 
 #endif // PERF_STAT_ENABLE
