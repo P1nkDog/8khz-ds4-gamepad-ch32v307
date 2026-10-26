@@ -12,12 +12,18 @@
 #include "usb_descriptors.h"
 #include "ds4_descriptors.h"
 #include "cdc_descriptors.h"
+#include "config.h"
 #include "ch32v30x.h"
 
 //--------------------------------------------------------------------+
 // 全局模式变量
 //--------------------------------------------------------------------+
 UsbMode current_mode = USB_MODE_HID;
+
+//--------------------------------------------------------------------+
+// 可变的配置描述符副本（bInterval 需按配置的回报率改写）
+//--------------------------------------------------------------------+
+static uint8_t s_hid_cfg_desc[PS4_CONFIG1_DESC_SIZE];
 
 //--------------------------------------------------------------------+
 // 初始化：读取 PB12（Select / SW2）按键，决定工作模式
@@ -42,6 +48,14 @@ void usb_desc_init(void) {
     } else {
         current_mode = USB_MODE_HID;
     }
+
+    // 回报率由描述符 bInterval 决定
+    memcpy(s_hid_cfg_desc, ps4_configuration_descriptor, PS4_CONFIG1_DESC_SIZE);
+    uint32_t level = ((const PollingRateConfig *)config_get(CONFIG_ID_POLLING_RATE))->level;
+    if (level > POLL_RATE_8000) level = POLL_RATE_1000;      // 越界回退默认档
+    uint8_t binterval = (uint8_t)(6u - level);               // 250Hz→6 … 8kHz→1
+    s_hid_cfg_desc[PS4_CFG_DESC_BINTERVAL_IN]  = binterval;
+    s_hid_cfg_desc[PS4_CFG_DESC_BINTERVAL_OUT] = binterval;
 }
 
 //--------------------------------------------------------------------+
@@ -61,7 +75,7 @@ uint8_t const *tud_descriptor_device_cb(void) {
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
     (void)index;
     if (current_mode == USB_MODE_HID) {
-        return ps4_configuration_descriptor;
+        return s_hid_cfg_desc;
     } else {
         return cdc_configuration_descriptor;
     }

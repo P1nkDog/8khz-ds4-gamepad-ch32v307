@@ -707,6 +707,14 @@ static const uint8_t ps4_hid_descriptor[] =
 };
 
 #define PS4_CONFIG1_DESC_SIZE		(9+9+9+7+7)
+//配置描述符内 bInterval 字节的偏移（运行时按回报率档位改写）
+//布局：config(9) + interface(9) + HID(9) = 27 → 第一个 EP 描述符起点
+//      EP 描述符内 bLength(0) type(1) addr(2) attr(3) wMaxPacketSize(4,5) bInterval(6)
+#define PS4_CFG_DESC_BINTERVAL_IN   33   // 27 + 6
+#define PS4_CFG_DESC_BINTERVAL_OUT  40   // 27 + 7 + 6
+
+_Static_assert(PS4_CONFIG1_DESC_SIZE == 41, "描述符长度变化,bInterval 偏移必须重新核对");
+
 static const uint8_t ps4_configuration_descriptor[] =
 {
 	// configuration descriptor, USB spec 9.6.3, page 264-266, Table 9-10

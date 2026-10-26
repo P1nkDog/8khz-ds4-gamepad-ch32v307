@@ -62,6 +62,11 @@ static const uint32_t polling_interval_us[] = {
 uint32_t config_get_poll_interval_us(void) {
     const PollingRateConfig *cfg =
         (const PollingRateConfig *)config_get(CONFIG_ID_POLLING_RATE);
+    if (cfg == NULL) return polling_interval_us[POLL_RATE_1000];
+
+    const uint32_t cnt = sizeof(polling_interval_us) / sizeof(polling_interval_us[0]);
+    if ((uint32_t)cfg->level >= cnt) return polling_interval_us[POLL_RATE_1000];
+
     return polling_interval_us[cfg->level];
 }
 
