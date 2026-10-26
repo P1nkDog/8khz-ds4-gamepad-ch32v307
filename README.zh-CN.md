@@ -159,7 +159,7 @@ Windows 下的官方烧录工具，选 USB 方式 → 选 `obj/8khz-ds4-gamepad-
 │   └── timer/                  # TIM2 微秒定时器
 ├── Peripheral/                 # CH32V30x 标准外设库（28 个模块）
 ├── Startup/                    # 启动文件（使用 D8C）
-├── TinyUSB/                    # TinyUSB 子模块 v0.20.0
+├── TinyUSB/                    # TinyUSB 子模块 v0.21.0
 ├── PCB/v0.1.0/                 # 硬件工程（EDA 源文件 / 原理图 PDF / Gerber）
 ├── obj/                        # 编译产物（gitignore）
 ├── README.md                   # 英文说明

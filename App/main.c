@@ -17,6 +17,8 @@
 #include "config.h"
 #include "joystick.h"
 #include "us_timer.h"
+#include "tusb.h"
+#include "usb_device.h"
 
 
 /* Global typedef */
@@ -39,8 +41,7 @@ int main(void)
     config_init();
     us_timer_init();
     usb_desc_init();
-
-    tud_init(BOARD_TUD_RHPORT);
+    usb_device_init();
 
     printf("SystemClk:%d\r\n", SystemCoreClock);
     printf("ChipID:%08x\r\n", DBGMCU_GetCHIPID());

@@ -159,7 +159,7 @@ The official Windows flashing tool: choose the USB transport → select `obj/8kh
 │   └── timer/                  # TIM2 microsecond timer
 ├── Peripheral/                 # CH32V30x standard peripheral library (28 modules)
 ├── Startup/                    # startup code (D8C variant)
-├── TinyUSB/                    # TinyUSB submodule v0.20.0
+├── TinyUSB/                    # TinyUSB submodule v0.21.0
 ├── PCB/v0.1.0/                 # hardware project (EDA source / schematic PDFs / Gerber)
 ├── obj/                        # build output (gitignored)
 ├── README.md                   # English readme (this file)

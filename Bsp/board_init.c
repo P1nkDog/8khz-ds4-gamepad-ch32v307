@@ -23,13 +23,13 @@
 
 __attribute__((interrupt)) void USBHS_IRQHandler(void) {
   #if CFG_TUD_WCH_USBIP_USBHS
-  tud_int_handler(0);
+  tusb_int_handler(BOARD_TUD_RHPORT, true);
   #endif
 }
 
 __attribute__((interrupt)) void OTG_FS_IRQHandler(void) {
   #if CFG_TUD_WCH_USBIP_USBFS
-  tud_int_handler(0);
+  tusb_int_handler(BOARD_TUD_RHPORT, true);
   #endif
 }
 
@@ -116,7 +116,7 @@ __attribute__((interrupt)) void SysTick_Handler(void) {
   system_ticks++;
 }
 
-uint32_t board_millis(void) {
+uint32_t tusb_time_millis_api(void) {
   return system_ticks;
 }
 
