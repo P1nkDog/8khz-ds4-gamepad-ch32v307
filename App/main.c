@@ -49,9 +49,6 @@ int main(void)
     printf("Mode: %s\r\n", current_mode == USB_MODE_HID ? "HID" : "CDC");
 
     gamepad_init();
-    
-    uint32_t send_interval_us = config_get_poll_interval_us();
-    uint32_t last_send_us = 0;
 
     PERF_STAT_RESET();
 
@@ -60,13 +57,13 @@ int main(void)
         tud_task();
 
         if (current_mode == USB_MODE_HID) {
-            uint32_t now_us = micros();
-            if ((now_us - last_send_us) >= send_interval_us) {
+            // 上报节奏完全由 USB 令牌驱动（bInterval 决定），软件不做节拍；
+            // 未挂载时不能组帧，否则 aux 计数会被空转刷爆
+            if (tud_mounted() && ds4_ready_to_send()) {
                 PERF_STAT_BEGIN();
                 gamepad_process();
                 ds4_process(gamepad_get_state());
                 PERF_STAT_END();
-                last_send_us = now_us;
             }
         } else {
             cdc_process();
@@ -74,9 +71,9 @@ int main(void)
         }
 
     #if PERF_STAT_DUMP_WHEN_MOUNTED
-            PERF_STAT_DUMP(tud_mounted(), 0);
+            PERF_STAT_DUMP(tud_mounted(), ds4_get_drop_count());
     #else
-            PERF_STAT_DUMP(!tud_mounted(), 0);
+            PERF_STAT_DUMP(!tud_mounted(), ds4_get_drop_count());
     #endif
 
     }

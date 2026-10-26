@@ -27,6 +27,13 @@ _Static_assert(offsetof(PS4Report, rightStickY) == 4,  "报告布局漂移(摇�
 _Static_assert(offsetof(PS4Report, miscData)    == 10, "报告布局漂移(vendor区)");
 
 //--------------------------------------------------------------------+
+// 发送状态（事件驱动，主循环与回调之间共享）
+//--------------------------------------------------------------------+
+static volatile bool     s_ep_free     = true;  // 端点空闲
+static volatile uint32_t s_drop_count  = 0;     // 累计丢帧
+static uint32_t          s_ep_busy_us  = 0;     // 端点开始忙的时刻
+
+//--------------------------------------------------------------------+
 // 初始化
 //--------------------------------------------------------------------+
 void ds4_driver_init(void) {
@@ -34,15 +41,47 @@ void ds4_driver_init(void) {
 }
 
 //--------------------------------------------------------------------+
-// 手柄数据发送
+// 发送状态查询与空闲超时兜底
 //--------------------------------------------------------------------+
-void ds4_send_report(PS4Report *report) {
-    uint32_t deadline = micros() + 100;
-    while (!tud_hid_ready()) {
-        tud_task();
-        if ((int32_t)(micros() - deadline) >= 0) return;
+
+//端点是否可发送：忙超过 1ms 视为完成回调丢失，强制解锁
+bool ds4_ready_to_send(void) {
+    if (s_ep_free) return true;
+
+    if ((micros() - s_ep_busy_us) >= 1000u) {
+        s_ep_free = true;
+        s_drop_count++;
+        return true;
     }
-    tud_hid_report(0, report, sizeof(PS4Report));
+    return false;
+}
+
+//累计丢帧数
+uint32_t ds4_get_drop_count(void) {
+    return s_drop_count;
+}
+
+//--------------------------------------------------------------------+
+// 手柄数据发送（非阻塞）
+//--------------------------------------------------------------------+
+bool ds4_send_report(const PS4Report *report) {
+    if (!s_ep_free) {
+        s_drop_count++;
+        return false;
+    }
+    if (!tud_hid_report(0, report, sizeof(PS4Report))) {
+        s_drop_count++;
+        return false;
+    }
+    s_ep_busy_us = micros();
+    s_ep_free    = false;
+    return true;
+}
+
+//TinyUSB IN 传输完成回调：一个令牌回一帧
+void tud_hid_report_complete_cb(uint8_t instance, uint8_t const* report, uint16_t len) {
+    (void)instance; (void)report; (void)len;
+    s_ep_free = true;
 }
 
 //--------------------------------------------------------------------+

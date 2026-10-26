@@ -33,7 +33,7 @@
 // 所以"知道 USB 挂载状态"的仍然是调用方，模块保持零业务依赖。
 //--------------------------------------------------------------------+
 #ifndef PERF_STAT_DUMP_WHEN_MOUNTED
-#define PERF_STAT_DUMP_WHEN_MOUNTED 0
+#define PERF_STAT_DUMP_WHEN_MOUNTED 1
 #endif
 
 #if PERF_STAT_ENABLE
