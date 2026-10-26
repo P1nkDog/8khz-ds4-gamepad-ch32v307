@@ -136,6 +136,7 @@
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Driver/cdc}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Driver/msp}&quot;"/>
                   <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Driver/usb}&quot;"/>
+                  <listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/Driver/stat}&quot;"/>
                 </option>
                 <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.systempaths.2011720354" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.systempaths" useByScannerDiscovery="true" valueType="includePath"/>
                 <option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.files.542153928" superClass="ilg.gnumcueclipse.managedbuild.cross.riscv.option.c.compiler.include.files" useByScannerDiscovery="true" valueType="includeFiles"/>

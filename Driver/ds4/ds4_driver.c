@@ -7,12 +7,24 @@
 *********************************************************************************/
 
 #include <string.h>
+#include <stddef.h>
 
 #include "board_api.h"
 #include "tusb.h"
 #include "ds4_descriptors.h"
 #include "ds4_driver.h"
 #include "us_timer.h"
+
+//--------------------------------------------------------------------+
+// 报告布局编译期断言（报告描述符声明 63 字节 + Report ID = 64）
+// 注意：leftTrigger/rightTrigger 是 8 位位域，不能对它们取 offsetof，
+//       因此用非位域成员的偏移间接锁定：reportID@0、rightStickY@4、miscData@10
+//       三者成立即证明 dpad+按键+counter 恰好占 3 字节、扳机占 2 字节。
+//--------------------------------------------------------------------+
+_Static_assert(sizeof(PS4Report) == 64, "PS4Report 必须恰好 64 字节");
+_Static_assert(offsetof(PS4Report, reportID)    == 0,  "报告布局漂移(报告ID)");
+_Static_assert(offsetof(PS4Report, rightStickY) == 4,  "报告布局漂移(摇杆)");
+_Static_assert(offsetof(PS4Report, miscData)    == 10, "报告布局漂移(vendor区)");
 
 //--------------------------------------------------------------------+
 // 初始化
@@ -41,6 +53,11 @@ void ds4_process(const GamepadState *state) {
     PS4Report report;
     memset(&report, 0, sizeof(PS4Report));
     report.reportID = 0x01;
+
+    // 上报计数器：主机侧连续无跳号 = 一帧未丢（8kHz 的地面真值）
+    static uint8_t s_report_counter = 0;
+    report.reportCounter = (uint8_t)(s_report_counter & 0x3Fu);
+    s_report_counter = (uint8_t)((s_report_counter + 1u) & 0x3Fu);
 
     report.leftStickX = state -> lx >> 4;
     report.leftStickY = state -> ly >> 4;

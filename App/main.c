@@ -19,6 +19,7 @@
 #include "us_timer.h"
 #include "tusb.h"
 #include "usb_device.h"
+#include "perf_stat.h"
 
 
 /* Global typedef */
@@ -52,6 +53,8 @@ int main(void)
     uint32_t send_interval_us = config_get_poll_interval_us();
     uint32_t last_send_us = 0;
 
+    PERF_STAT_RESET();
+
     while (1)
     {
         tud_task();
@@ -59,13 +62,22 @@ int main(void)
         if (current_mode == USB_MODE_HID) {
             uint32_t now_us = micros();
             if ((now_us - last_send_us) >= send_interval_us) {
+                PERF_STAT_BEGIN();
                 gamepad_process();
                 ds4_process(gamepad_get_state());
+                PERF_STAT_END();
                 last_send_us = now_us;
             }
         } else {
             cdc_process();
             joystick_process();
         }
+
+    #if PERF_STAT_DUMP_WHEN_MOUNTED
+            PERF_STAT_DUMP(tud_mounted(), 0);
+    #else
+            PERF_STAT_DUMP(!tud_mounted(), 0);
+    #endif
+
     }
 }

@@ -26,6 +26,21 @@
 				"parentLogicPath": "",
 				"type": "file",
 				"name": "*.wvproj"
+			},
+			{
+				"parentLogicPath": "",
+				"type": "file",
+				"name": "*.7z"
+			},
+			{
+				"parentLogicPath": "",
+				"type": "file",
+				"name": "*.zip"
+			},
+			{
+				"parentLogicPath": "",
+				"type": "file",
+				"name": "*.tar"
 			}
 		],
 		"projectName": "8khz-ds4-gamepad-ch32v307",
@@ -35,14 +50,15 @@
 	"buildConfig": {
 		"configurations": [
 			{
+				"parallelizationNumber": "optimal",
 				"buildArtifact": {
 					"artifact_name": "${ProjName}",
 					"artifact_extension": "elf",
 					"output_prefix": "",
 					"artifact_type": "Executable"
 				},
-				"parallelizationNumber": "optimal",
 				"stop_on_first_build_error": true,
+				"usingCacheAccelerate": false,
 				"pre_script": "",
 				"pre_script_description": "",
 				"post_script": "",
@@ -190,7 +206,8 @@
 							"${project}/Driver/timer",
 							"${project}/Driver/cdc",
 							"${project}/Driver/msp",
-							"${project}/Driver/usb"
+							"${project}/Driver/usb",
+							"${project}/Driver/stat"
 						],
 						"include_system_paths": [],
 						"include_files": []
