@@ -40,7 +40,6 @@ int main(void)
 {
     board_init();
     config_init();
-    us_timer_init();
     usb_desc_init();
     usb_device_init();
 

@@ -14,6 +14,7 @@
 
 #include "board_api.h"
 #include "board.h"
+#include "us_timer.h"
 
 //--------------------------------------------------------------------+
 // 将USB中断事件转发到TinyUSB IRQ处理器
@@ -37,30 +38,30 @@ __attribute__((interrupt)) void OTG_FS_IRQHandler(void) {
 // MACRO TYPEDEF CONSTANT ENUM 宏类型定义常数枚举
 //--------------------------------------------------------------------+
 
-static uint32_t SysTick_Config(uint32_t ticks) {            //SysTick 配置
-  NVIC_EnableIRQ(SysTicK_IRQn);
-  SysTick->CTLR = 0;
-  SysTick->SR = 0;
-  SysTick->CNT = 0;
-  SysTick->CMP = ticks - 1;
-  SysTick->CTLR = 0xF;
-  return 0;
-}
+// static uint32_t SysTick_Config(uint32_t ticks) {            //SysTick 配置
+//   NVIC_EnableIRQ(SysTicK_IRQn);
+//   SysTick->CTLR = 0;
+//   SysTick->SR = 0;
+//   SysTick->CNT = 0;
+//   SysTick->CMP = ticks - 1;
+//   SysTick->CTLR = 0xF;
+//   return 0;
+// }
 
 void board_init(void) {                                    //板级总初始化函数
 
   /* Disable interrupts during init */
   __disable_irq();                                         //关闭全局中断
 
-	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);         //NVIC优先级分组
-	SystemCoreClockUpdate();                                //更新系统时钟
+  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);         //NVIC优先级分组
+  SystemCoreClockUpdate();                                //更新系统时钟
   Delay_Init();                                           //延时函数初始化
 
+  us_timer_init();
 
-
-#if CFG_TUSB_OS == OPT_OS_NONE
-  SysTick_Config(SystemCoreClock / 1000);
-#endif
+// #if CFG_TUSB_OS == OPT_OS_NONE
+//   SysTick_Config(SystemCoreClock / 1000);
+// #endif
 
   USART_Printf_Init(CFG_BOARD_UART_BAUDRATE);             //初始化 UART 串口
 
@@ -109,15 +110,15 @@ void board_init(void) {                                    //板级总初始化�
 }
 
 #if CFG_TUSB_OS == OPT_OS_NONE
-volatile uint32_t system_ticks = 0;
+// volatile uint32_t system_ticks = 0;
 
-__attribute__((interrupt)) void SysTick_Handler(void) {
-  SysTick->SR = 0;
-  system_ticks++;
-}
+// __attribute__((interrupt)) void SysTick_Handler(void) {
+//   SysTick->SR = 0;
+//   system_ticks++;
+// }
 
 uint32_t tusb_time_millis_api(void) {
-  return system_ticks;
+  return micros() / 1000u;
 }
 
 #endif
