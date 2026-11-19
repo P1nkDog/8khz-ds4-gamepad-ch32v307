@@ -13,17 +13,10 @@
  extern "C" {
 #endif
 
-// LED: need to wire pin LED1 to PA0 in the J3 header
-#define LED_PORT              GPIOA
-#define LED_PIN               GPIO_Pin_0
-#define LED_STATE_ON          0
-#define LED_CLOCK_EN()        RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE)
-
-// Button: need to wire pin KEY to PA2 in the J3 header
-#define BUTTON_PORT           GPIOA
-#define BUTTON_PIN            GPIO_Pin_2
-#define BUTTON_STATE_ACTIVE   0
-#define BUTTON_CLOCK_EN()     do { } while(0) // same as LED clock, no need to do anything
+// v0.2.0 硬件：模板遗留的 PA0(LED) / PA2(KEY) 在板上未引出，且 PA2 已分配给
+// USART2_TX（调试串口），故此处不再定义，board_init() 也不再初始化这两个引脚。
+//
+// 调试串口：USART2_TX = PA2（见 Debug/debug.h 的 DEBUG_UART2）
 
 // TODO UART port
 

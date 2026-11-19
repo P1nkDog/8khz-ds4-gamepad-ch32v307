@@ -26,8 +26,9 @@
 #define DEBUG_UART3    3
 
 /* DEBUG UATR Definition */
+/* v0.2.0 硬件：USART1(PA9) 未引出，调试输出改走 USART2_TX = PA2（仅 TX，无 RX） */
 #ifndef DEBUG
-#define DEBUG   DEBUG_UART1
+#define DEBUG   DEBUG_UART2
 #endif
 
 /* SDI Printf Definition */

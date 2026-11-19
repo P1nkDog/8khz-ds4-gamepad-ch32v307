@@ -86,23 +86,9 @@ void board_init(void) {                                    //板级总初始化�
   RCC_OTGFSCLKConfig(otg_div);
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_OTG_FS, ENABLE);
 
-  GPIO_InitTypeDef GPIO_InitStructure = {0};
+  // v0.2.0 硬件无用户 LED、无独立 KEY 按键：
+  // 模板遗留的 PA0(LED) / PA2(KEY) 初始化已移除，PA2 让给 USART2_TX（调试串口）。
 
-  // LED
-  LED_CLOCK_EN();
-  GPIO_InitStructure.GPIO_Pin = LED_PIN;
-  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_OD;
-  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-  GPIO_Init(LED_PORT, &GPIO_InitStructure);
-
-  // Button
-#ifdef BUTTON_PORT
-  BUTTON_CLOCK_EN();
-  GPIO_InitStructure.GPIO_Pin = BUTTON_PIN;
-  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
-  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-  GPIO_Init(BUTTON_PORT, &GPIO_InitStructure);
-#endif
   /* Enable interrupts globally */
   __enable_irq();
 
@@ -128,7 +114,7 @@ uint32_t tusb_time_millis_api(void) {
 //--------------------------------------------------------------------+
 
 void board_led_write(bool state) {
-  GPIO_WriteBit(LED_PORT, LED_PIN, state);
+  (void) state;   // v0.2.0 板无用户 LED（模板遗留 PA0 已移除）
 }
 
 uint32_t board_button_read(void) {
