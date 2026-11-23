@@ -8,14 +8,28 @@
 
 #include "input.h"
 #include "ch32v30x.h"
+#include "config.h"
+#include "us_timer.h"
 
 // 摇杆校准值
 static int16_t adc_calibrattion_val;
 
-// 按键消抖状态：最近 4 帧原始位图 + 最终输出的稳定态
-static uint32_t btn_hist[4];
-static uint8_t  btn_hist_idx;
-static uint32_t btn_stable;
+//--------------------------------------------------------------------+
+// 按键消抖状态（26 键独立时间窗口）
+//  旧实现是"最近 4 帧原始位图全等才输出稳定态"，稳定窗随轮询率等比缩放
+//  （8kHz = 0.5ms、1kHz = 4ms、250Hz = 16ms），同一个固件换个回报率档位
+//  手感就变了。这里改成每键记录"原始电平最后一次变化"的 micros() 时间戳：
+//  原始电平与稳定态不一致、且已持续 >= debounce_ms 才翻转，
+//  稳定窗是与轮询率无关的恒定毫秒数。
+//
+//  时间比较一律用 uint32_t 无符号减法 (now - change_us)：micros() 的 32-bit
+//  计数器约 71.5 分钟回绕一次，无符号减法在回绕点依然给出正确的"经过时长"。
+//--------------------------------------------------------------------+
+#define INPUT_DEBOUNCE_KEY_COUNT 26U   // Bit0~17 标准键 + Bit18~25 扩展键
+
+static uint32_t btn_raw_last;                              // 上一次采样的原始位图
+static uint32_t btn_stable;                                // 已通过消抖的稳定位图
+static uint32_t btn_change_us[INPUT_DEBOUNCE_KEY_COUNT];    // 每键原始电平最后变化时刻
 
 //--------------------------------------------------------------------+
 // ADC初始化
@@ -186,6 +200,13 @@ static uint8_t gpio_read_pin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin){
 void input_init(void){
     adc_function_init();
     button_gpio_init();
+
+    //消抖状态清零：基准态从"全松开"开始，避免上电瞬间残留脏时间戳
+    btn_raw_last = 0;
+    btn_stable   = 0;
+    for (uint8_t i = 0; i < INPUT_DEBOUNCE_KEY_COUNT; i++) {
+        btn_change_us[i] = 0;
+    }
 }
 
 
@@ -243,24 +264,47 @@ void input_read_buttons(uint32_t *buttons){
     if(gpio_read_pin(GPIOB, GPIO_Pin_3) == 0) raw |= INPUT_MASK_BTN8;
 
     //--------------------------------------------------------------------+
-    // 4 帧一致性消抖（零阻塞）
+    // 26 键独立时间窗口消抖（零阻塞，恒定毫秒级）
     //--------------------------------------------------------------------+
-    //  机械触点抖动 1~5ms，8kHz 下每 125us 采一次，会把抖动如实上报 8~40 次；
+    //  机械触点抖动 1~5ms，8kHz 下每 125us 采一次会把抖动如实上报 8~40 次；
     //  主机侧虽然有去抖，但菜单单次确认、格斗游戏的帧精确输入仍会受影响。
-    //  这里保留最近 4 帧的原始位图，4 帧完全一致才把稳定态输出出去：
-    //    - 零阻塞：不延时、不等待，只比较 4 个 32bit 变量（约 10 个周期）；
-    //    - 8kHz 等效稳定窗 = 4 x 125us = 0.5ms；1kHz = 4ms；250Hz = 16ms。
-    //      稳定窗随帧周期等比放大是"帧计数消抖"的固有代价（低回报率档位延迟换来的
-    //      是更彻底的抖动滤除）；若需要恒定时间窗，应改成基于 micros() 的时间戳版本。
-    //    - 中间态（4 帧不一致）保持上一次的稳定值，不会产生中间抖动。
-    btn_hist[btn_hist_idx] = raw;
-    btn_hist_idx = (uint8_t)((btn_hist_idx + 1u) & 0x03u);
-
-    if (btn_hist[0] == btn_hist[1] &&
-        btn_hist[1] == btn_hist[2] &&
-        btn_hist[2] == btn_hist[3]) {
-        btn_stable = raw;
+    //  这里不再用"帧计数"，而是给每一路按键独立计时：
+    //    - 原始电平变化时只刷新该键的时间戳（不立即翻转）；
+    //    - 原始电平与稳定态不一致且持续 >= debounce_ms，才把稳定态翻过去；
+    //    - 中间毛刺（持续不足 debounce_ms）会被下一次采样重置时间戳，天然滤除；
+    //    - 每键独立，26 个键互不干扰（A 键抖不会拖慢 B 键的报告）。
+    //  debounce_ms = 0 时走直通分支：完全不做时间判断，等价于关闭消抖。
+    const GamepadSettings *settings =
+        (const GamepadSettings *)config_get(CONFIG_ID_GAMEPAD_SETTINGS);
+    uint8_t debounce_ms = (settings != NULL) ? settings->debounce_ms : 4U;
+    if (debounce_ms > CONFIG_DEBOUNCE_MAX_MS) {
+        debounce_ms = CONFIG_DEBOUNCE_MAX_MS;   //配置层已拒收，这里是运行期兜底
     }
 
+    if (debounce_ms == 0U) {
+        //关闭消抖：原始电平直接作为稳定态，零延迟
+        btn_stable   = raw;
+        btn_raw_last = raw;
+        *buttons     = btn_stable;
+        return;
+    }
+
+    const uint32_t debounce_us = (uint32_t)debounce_ms * 1000U;
+    const uint32_t now = micros();
+
+    for (uint8_t i = 0; i < INPUT_DEBOUNCE_KEY_COUNT; i++) {
+        const uint32_t mask = (1UL << i);
+
+        if ((raw & mask) != (btn_raw_last & mask)) {
+            //原始电平刚变化：只记录时刻，等它稳住
+            btn_change_us[i] = now;
+        } else if (((raw & mask) != (btn_stable & mask)) &&
+                   ((uint32_t)(now - btn_change_us[i]) >= debounce_us)) {
+            //电平已保持 debounce_ms 不变，且与当前稳定态不同 → 正式翻转这一位
+            btn_stable = (btn_stable & ~mask) | (raw & mask);
+        }
+    }
+
+    btn_raw_last = raw;
     *buttons = btn_stable;
 }

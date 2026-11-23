@@ -50,11 +50,16 @@ typedef struct{
 #define JOYSTICK_INVERT_RY       (1U << 3)   // 右摇杆 Y
 #define JOYSTICK_INVERT_MASK_ALL 0x0FU       // 合法位全集（bit4~7 必须为 0）
 
+//按键消抖时间上限（毫秒）
+//  0 = 关闭消抖（原始电平直通）；Driver/input/input.c 会按此值做运行期钳位。
+//  上限取 50ms：远高于机械触点抖动（1~5ms），又不至于让用户感到"按键粘滞"。
+#define CONFIG_DEBOUNCE_MAX_MS 50U
+
 typedef struct{
     uint16_t deadzone_left;   // 左摇杆死区 (0 ~ 2047, 12-bit ADC count)
     uint16_t deadzone_right;  // 右摇杆死区 (0 ~ 2047, 12-bit ADC count)
     uint8_t  invert_mask;     // 轴向反转位掩码: bit0=LX, bit1=LY, bit2=RX, bit3=RY
-    uint8_t  _reserved;       // 预留对齐字节，强制保持为 0
+    uint8_t  debounce_ms;     // 按键消抖时间 (0 ~ 50 ms, 0 = 关闭消抖直通)
 } GamepadSettings;
 
 //回报率设置
