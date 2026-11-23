@@ -39,10 +39,7 @@ typedef enum
 //    24 byte  - zero padding
 
 
-// 初始化
-void ds4_driver_init(void);
-
-// 端点是否可发送（内含 1ms 超时兜底，防止完成回调丢失导致卡死）
+// 端点是否可发送（内含"2×轮询周期、下限 1ms"的动态超时兜底，防止完成回调丢失导致卡死）
 bool ds4_ready_to_send(void);
 
 // 主循环处理（参考 PS4Driver::process）

@@ -14,6 +14,7 @@
 #include "ds4_descriptors.h"
 #include "ds4_driver.h"
 #include "us_timer.h"
+#include "config.h"
 
 //--------------------------------------------------------------------+
 // 报告布局编译期断言（报告描述符声明 63 字节 + Report ID = 64）
@@ -29,26 +30,32 @@ _Static_assert(offsetof(PS4Report, miscData)    == 10, "报告布局漂移(vendo
 //--------------------------------------------------------------------+
 // 发送状态（事件驱动，主循环与回调之间共享）
 //--------------------------------------------------------------------+
-static volatile bool     s_ep_free     = true;  // 端点空闲
-static volatile uint32_t s_drop_count  = 0;     // 累计丢帧
-static uint32_t          s_ep_busy_us  = 0;     // 端点开始忙的时刻
-
-//--------------------------------------------------------------------+
-// 初始化
-//--------------------------------------------------------------------+
-void ds4_driver_init(void) {
-    // TODO: 初始化 GPIO、ADC
-}
+static volatile bool     s_ep_free      = true;  // 端点空闲
+static volatile uint32_t s_drop_count   = 0;     // 累计丢帧
+static uint32_t          s_ep_busy_us   = 0;     // 端点开始忙的时刻
+static uint32_t          s_ep_timeout_us = 1000u; // 本次传输的看门狗阈值
 
 //--------------------------------------------------------------------+
 // 发送状态查询与空闲超时兜底
 //--------------------------------------------------------------------+
 
-//端点是否可发送：忙超过 1ms 视为完成回调丢失，强制解锁
+//计算本次传输的看门狗阈值
+//  阈值必须跟随实际帧周期：USB 高速端点发送后要等主机下一次 IN 令牌才算完成，
+//  250Hz 档（bInterval=6，帧周期 4ms）的端点在物理上就要忙 4ms。
+//  若沿用固定 1ms 阈值，低回报率档位会把每一帧都误判成"完成回调丢失"，
+//  丢帧计数被刷成噪音（失去 8kHz 调优参考值），并会在同一令牌周期内重复组帧。
+//  取 2 倍帧周期作为容差，下限仍保留 1ms（8kHz/4kHz 档的兜底灵敏度不变）。
+static uint32_t ds4_watchdog_timeout_us(void) {
+    uint32_t period  = config_get_poll_interval_us();   // 125 ~ 4000us
+    uint32_t timeout = period * 2u;
+    return (timeout > 1000u) ? timeout : 1000u;
+}
+
+//端点是否可发送：忙超过看门狗阈值视为完成回调丢失，强制解锁
 bool ds4_ready_to_send(void) {
     if (s_ep_free) return true;
 
-    if ((micros() - s_ep_busy_us) >= 1000u) {
+    if ((micros() - s_ep_busy_us) >= s_ep_timeout_us) {
         s_ep_free = true;
         s_drop_count++;
         return true;
@@ -69,12 +76,20 @@ bool ds4_send_report(const PS4Report *report) {
         s_drop_count++;
         return false;
     }
+
+    //先置忙、再提交：tud_hid_report_complete_cb() 跑在 USB 中断上下文，
+    //  若"先提交后置忙"，理论上存在"回调先把 s_ep_free 置 true、随后又被
+    //  这里的赋值覆盖成 false"的窗口，端点会一直挂到看门狗超时才解锁。
+    //  先置忙后提交后，ISR 只可能把忙改成空闲，状态变化方向永远是安全的。
+    s_ep_busy_us    = micros();
+    s_ep_timeout_us = ds4_watchdog_timeout_us();
+    s_ep_free       = false;
+
     if (!tud_hid_report(0, report, sizeof(PS4Report))) {
+        s_ep_free = true;      //提交失败，立刻回滚忙标志，不占着看门狗窗口
         s_drop_count++;
         return false;
     }
-    s_ep_busy_us = micros();
-    s_ep_free    = false;
     return true;
 }
 
@@ -155,7 +170,7 @@ static const uint8_t ps4_output_0x03[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-static uint8_t ps4_output_0x12[] = {
+static const uint8_t ps4_output_0x12[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // device MAC
     0x08, 0x25, 0x00,                      // BT device class
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00   // host MAC
@@ -180,94 +195,6 @@ static const uint8_t ps4_output_0xf2_notready[] = {
 static const uint8_t ps4_output_0xf3[] = {
     0x00, 0x38, 0x38, 0x00, 0x00, 0x00, 0x00
 };
-
-//--------------------------------------------------------------------+
-// 设备描述符回调
-//--------------------------------------------------------------------+
-
-// uint8_t const *tud_descriptor_device_cb(void) {
-//     return ps4_device_descriptor;  
-// }
-
-//--------------------------------------------------------------------+
-// 配置描述符回调
-//--------------------------------------------------------------------+
-
-// Invoked when received GET CONFIGURATION DESCRIPTOR
-// Application return pointer to descriptor
-// Descriptor contents must exist long enough for transfer to complete
-// uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
-//   (void)index; // for multiple configurations
-//   return ps4_configuration_descriptor;
-// }
-
-
-//--------------------------------------------------------------------+
-// 字符串描述符
-//--------------------------------------------------------------------+
-
-// String Descriptor Index
-// enum {
-//   STRID_LANGID = 0,
-//   STRID_MANUFACTURER,
-//   STRID_PRODUCT,
-//   STRID_SERIAL,
-// };
-
-// array of pointer to string descriptors
-// static char const *string_desc_arr[] = {
-//     (const char *)ps4_string_language,
-//     (const char *)ps4_string_manufacturer,
-//     (const char *)ps4_string_product,
-//     NULL,
-// };
-
-// static uint16_t _desc_str[32 + 1];
-
-// Invoked when received GET STRING DESCRIPTOR request
-// Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
-// uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
-//   (void)langid;
-//   size_t chr_count;
-
-//   switch (index) {
-//     case STRID_LANGID:
-//       memcpy(&_desc_str[1], string_desc_arr[0], 2);
-//       chr_count = 1;
-//       break;
-
-//     case STRID_SERIAL: chr_count = board_usb_get_serial(_desc_str + 1, 32); break;
-
-//     default:
-//       // Note: the 0xEE index string is a Microsoft OS 1.0 Descriptors.
-//       // https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/microsoft-defined-usb-descriptors
-
-//       if (!(index < sizeof(string_desc_arr) / sizeof(string_desc_arr[0]))) {
-//         return NULL;
-//       }
-
-//       const char *str = string_desc_arr[index];
-
-//       // Cap at max char
-//       chr_count = strlen(str);
-
-//       size_t const max_count = sizeof(_desc_str) / sizeof(_desc_str[0]) - 1; // -1 for string type
-//       if (chr_count > max_count) {
-//         chr_count = max_count;
-//       }
-
-//       // Convert ASCII string into UTF-16
-//       for (size_t i = 0; i < chr_count; i++) {
-//         _desc_str[1 + i] = str[i];
-//       }
-//       break;
-//   }
-
-  // first byte is length (including header), second byte is string type
-//   _desc_str[0] = (uint16_t)((TUSB_DESC_STRING << 8) | (2 * chr_count + 2));
-
-//   return _desc_str;
-// }
 
 //--------------------------------------------------------------------+
 // HID 报告描述符

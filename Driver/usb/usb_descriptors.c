@@ -50,9 +50,16 @@ void usb_desc_init(void) {
     }
 
     // 回报率由描述符 bInterval 决定
+    //   高速口上 bInterval 的单位是 125us，实际周期 = 2^(bInterval-1) x 125us，
+    //   所以 6 档档位正好对应 6-level：250Hz→6(4ms) … 8kHz→1(125us)。
     memcpy(s_hid_cfg_desc, ps4_configuration_descriptor, PS4_CONFIG1_DESC_SIZE);
-    uint32_t level = ((const PollingRateConfig *)config_get(CONFIG_ID_POLLING_RATE))->level;
-    if (level > POLL_RATE_8000) level = POLL_RATE_1000;      // 越界回退默认档
+
+    // config_get() 在配置组未注册时返回 NULL，这里兜底到默认档，避免解引用空指针
+    const PollingRateConfig *poll_cfg =
+        (const PollingRateConfig *)config_get(CONFIG_ID_POLLING_RATE);
+    uint32_t level = (poll_cfg != NULL) ? (uint32_t)poll_cfg->level : (uint32_t)POLL_RATE_1000;
+
+    if (level > (uint32_t)POLL_RATE_8000) level = (uint32_t)POLL_RATE_1000;  // 越界回退默认档
     uint8_t binterval = (uint8_t)(6u - level);               // 250Hz→6 … 8kHz→1
     s_hid_cfg_desc[PS4_CFG_DESC_BINTERVAL_IN]  = binterval;
     s_hid_cfg_desc[PS4_CFG_DESC_BINTERVAL_OUT] = binterval;
