@@ -1,296 +1,369 @@
-# CH32V307 DS4 8K Gamepad
+# CH32V307 DS4 8K Gamepad — v0.2.0
 
-> A complete PS4 DualShock 4 gamepad solution with an 8000 Hz polling rate: firmware + PCB + web configurator
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-`v0.1.0` · Web configurator: [P1nkDog/ds4-gamepad-configurator](https://github.com/P1nkDog/ds4-gamepad-configurator)
+A complete PS4 DualShock 4 compatible gamepad: **firmware + PCB + browser configurator**.
+Built on WCH **CH32V307VCT6** (RISC-V RV32IMACXW @ 144 MHz) with **TinyUSB 0.21** on the
+chip's High-Speed USB 2.0 port (480 Mbps), so the HID interrupt endpoint can run down to a
+**125 µs report interval (8 kHz)**.
 
-English | [中文](./README.zh-CN.md)
+Web configurator: [P1nkDog/ds4-gamepad-configurator](https://github.com/P1nkDog/ds4-gamepad-configurator)
+
+- **Firmware version**: 0.1.0 (reported over MSP)
+- **Hardware version**: v0.2.0 (pin map in this document is the single source of truth)
+
+> ⚠️ **The pin map below is authoritative for the v0.2.0 PCB and has been verified on real
+> hardware.** Older documents under `Docs/` (e.g. `引脚重映射修改指南_2026-10-10.md`) are kept
+> as historical archives and **contradict** this table — do not follow them.
 
 ---
 
-## Features
+## 1. Features
 
-- **8 kHz polling rate** — uses the CH32V307 USB High-Speed port (480 Mbps); with HID endpoint `bInterval = 1` that is 125 µs per report. Six selectable rates (250 / 500 / 1k / 2k / 4k / 8k), default 1 kHz
-- **Native DS4 device** — the report descriptor and the 64-byte input report follow the DualShock 4 spec, so the host recognises it as a PS4 controller with no driver or remapping software
-- **HID / CDC dual mode** — at power-up the firmware reads the Share button (PB12) and boots either as a gamepad or as a serial configuration device
-- **MSP v1 configuration protocol** — 15 commands covering version queries, config read/write, live stick values, step-by-step calibration and device reboot
-- **Config stored in Flash** — two sectors written alternately (`0x08046000` / `0x08047000`) with magic `0xCF07` and CRC16, so a corrupted write falls back to the other sector
-- **Stick processing** — per-axis calibration (min / center / max), ADC inversion, deadzone, and full-scale mapping outside the deadzone
-- **Configured from the browser** — deadzone, per-axis calibration and polling rate are all editable in a web page over Web Serial, no driver needed
+| Feature | Detail |
+|---|---|
+| Polling rate | 250 / 500 / 1000 / 2000 / 4000 / 8000 Hz, selected in the configurator (default **1000 Hz**). Implemented as HID `bInterval = 6 … 1`, so 8 kHz = 125 µs per report |
+| Native DS4 identity | Report descriptor + 64-byte input report follow the DualShock 4 spec; the host sees a plain `054C:09CC` DualShock 4 with no driver, no remapper |
+| USB mode at boot | Plain plug → **DS4 HID mode**; hold **Share (PB12)** while plugging in → **CDC configuration mode** (virtual serial port for the browser tool) |
+| Sticks | 12-bit ADC, per-axis `min / center / max` calibration, deadzone 0–50 %, full-scale mapping outside the deadzone, saved in Flash |
+| Config storage | Two 4 KB Flash sectors (`0x0803E000` / `0x0803F000`), magic `0xCF07` + CRC16-CCITT, staged write (B first, then commit A) so a power loss mid-save always leaves one valid copy |
+| MSP v1 protocol | 15 commands: version query, config get/set/save/reset/status, live stick values, 5-step stick calibration, device reboot |
+| Deterministic send path | Report transmission is host-token driven (endpoint-completion callback), no software pacing loop, no frame tearing |
+| Diagnostics | Optional block-time profiler (`Driver/stat`) printing over the debug UART; drop-frame counter readable via MSP/log |
 
-> 8 kHz requires both the host and the cable to support USB High-Speed; the real rate also depends on host scheduling and degrades gracefully when plugged into a Full-Speed port.
+---
 
-## Hardware
+## 2. Hardware
 
-### MCU and key components
+### 2.1 MCU and key components
 
 | Item | Detail |
 |---|---|
-| MCU | CH32V307VCT6 (RISC-V RV32IMACXW, 288K Flash / 32K RAM, on-chip USBHS PHY) |
-| USB | USB 2.0 High-Speed (480 Mbps), device descriptor `bcdUSB = 0x0200` |
-| Sticks | Two analog sticks, sampled through ADC1 |
-| Buttons | Tactile switches plus one BOOT0 slide switch |
-| On-board LED / extra button | Reserved in code (PA0 for LED, active low; PA2 for a button) — **not routed on the current board**, see `Bsp/board.h` |
+| MCU | CH32V307VCT6 — RISC-V QingKe V4F, RV32IMACXW, 144 MHz, 288 KB Flash / 32 KB RAM (LQFP-100) |
+| USB | USB 2.0 High-Speed (480 Mbps) device, on-chip HS PHY, `bcdUSB = 0x0200` |
+| Sticks | Two analog sticks, sampled through ADC1 (polled, no DMA) |
+| Buttons | Tactile switches on the main board + FPC key panel; one BOOT0 slide switch |
+| Storage | Internal Flash, 2 × 4 KB sectors reserved for configuration |
+| LED | **None. The v0.2.0 board has no user LED** — `board_led_write()` is intentionally a no-op |
 
-### Pin assignment
+### 2.2 Clock tree
 
-**Sticks (ADC1)**
-
-| Axis | Pin | ADC channel |
+| Domain | Frequency | Notes |
 |---|---|---|
-| Left stick X | PC4 | ADC14 |
-| Left stick Y | PC5 | ADC15 |
-| Right stick X | PA7 | ADC7 |
-| Right stick Y | PA6 | ADC6 |
+| HSE | 8 MHz | External crystal |
+| SYSCLK / HCLK | 144 MHz | PLL = HSE × 18 |
+| PCLK1 (APB1) | 72 MHz | HCLK / 2 — USART2 (debug), TIM2 (×2 = 144 MHz timer clock) |
+| PCLK2 (APB2) | 72 MHz | HCLK / 2 — deliberately divided so **ADC = 72 / 8 = 9 MHz**, inside the 14 MHz datasheet limit |
+| USBHS | 480 MHz | USBHS PLL from HSE/2 = 4 MHz reference |
+| ADC1 | 9 MHz | `RCC_ADCCLKConfig(RCC_PCLK2_Div8)`; 71.5 + 12.5 = 84 cycles ≈ **9.3 µs per conversion**, 4 channels ≈ 37 µs per frame |
 
-**Buttons (active low, internal pull-up)**
+### 2.3 USB, debug and mode-select pins
 
-| Function | Pin | Function | Pin |
+| Function | Pin | Notes |
+|---|---|---|
+| USBHS D− | PB6 | Fixed USBHS pins, on-chip PHY |
+| USBHS D+ | PB7 | |
+| SWDIO | PA13 | Debug, kept alive (JTAG only disabled) |
+| SWCLK | PA14 | Debug, kept alive |
+| JTAG (JTDO/NJTRST/JTDI) | PB3 / PB4 / PA15 | **Released** to plain GPIO via `AFIO_PCFR1.SWJ_CFG = 010`; SWD unaffected. PB3 is reused as `BTN8` |
+| Mode select | PB12 | Sampled once at boot: **low = CDC config mode**, high = DS4 HID mode. Same pin as the Share button |
+| Debug UART TX | PA2 | `USART2_TX`, 115200 8N1, printf retarget (`Debug/debug.h`, `DEBUG = DEBUG_UART2`). Not broken out on the v0.2.0 board — wire it manually if you need logs |
+
+### 2.4 Analog sticks (ADC1)
+
+| Axis | Pin | ADC channel | Polarity |
 |---|---|---|---|
-| D-pad up | PE9 | L1 | PE7 |
-| D-pad down | PE11 | R1 | PB10 |
-| D-pad left | PE10 | L2 | PB0 |
-| D-pad right | PE8 | R2 | PB1 |
-| △ / Y | PE15 | Left stick click (L3) | PA5 |
-| ○ / B | PE14 | Right stick click (R3) | PE1 |
-| × / A | PE13 | PS | PE12 |
-| □ / X | PB11 | Touchpad (SW3) | PB13 |
-| Options / Start (SW4) | PB14 | Share / Select (SW2) | PB12 |
+| Left X (LX) | PC4 | `ADC_Channel_14` | **Inverted in firmware** (`v = 4095 - v`) |
+| Left Y (LY) | PC5 | `ADC_Channel_15` | Direct |
+| Right X (RX) | **PA5** | `ADC_Channel_5` | **Inverted in firmware** (`v = 4095 - v`) |
+| Right Y (RY) | PA6 | `ADC_Channel_6` | Direct |
 
-**Extra buttons (scanned, not reported to DS4)**
+PA5/PA6 and PC4/PC5 are configured as `GPIO_Mode_AIN`. The four conversions are polled
+sequentially with a bounded timeout (~400 µs guard) that falls back to the last valid sample,
+so a dead ADC can never hang the main loop.
 
-| No. | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-|---|---|---|---|---|---|---|---|---|
-| Pin | PD3 | PD4 | PD5 | PD6 | PD7 | PB3 | PB4 | PE0 |
+### 2.5 Buttons
 
-**Switches**
+**All buttons are active-low with the internal pull-up, except L1 and R1, which are active-high
+with the internal pull-down** (no external pull resistor on those two nets).
 
-| Part | Function | Behaviour |
-|---|---|---|
-| SW5 | BOOT0 | Set to **1** → 3.3 V, the chip enters its Bootloader on power-up (for flashing); back to **0** → GND, normal firmware boot |
-| SW2 | Share / Select | **Hold while powering up** (pulls PB12 low) → boots in CDC configuration mode; releasing it → HID gamepad mode |
+| DS4 function | Net name | Pin | GPIO mode | Active level |
+|---|---|---|---|---|
+| D-pad Up | UP | PE9 | Input pull-up | Low |
+| D-pad Down | DOWN | PE11 | Input pull-up | Low |
+| D-pad Left | LEFT | PE10 | Input pull-up | Low |
+| D-pad Right | RIGHT | PE8 | Input pull-up | Low |
+| △ Triangle (North) | Y | PE15 | Input pull-up | Low |
+| ○ Circle (East) | B | PE14 | Input pull-up | Low |
+| × Cross (South) | A | PE13 | Input pull-up | Low |
+| □ Square (West) | X | PB11 | Input pull-up | Low |
+| **L1** | L1 | **PE7** | **Input pull-DOWN** | **High** |
+| **R1** | R1 | **PB10** | **Input pull-DOWN** | **High** |
+| L2 (digital) | L2 | PB0 | Input pull-up | Low |
+| R2 (digital) | R2 | PB1 | Input pull-up | Low |
+| L3 (left stick click) | JS2 S3/S4 | **PA7** | Input pull-up | Low |
+| R3 (right stick click) | JS1 S3/S4 | PE1 | Input pull-up | Low |
+| PS / Home | PS | PE12 | Input pull-up | Low |
+| Share / Select | SW2 | PB12 | Input pull-up | Low (also boot-mode select) |
+| Options / Start | SW4 | PB14 | Input pull-up | Low |
+| Touchpad click | SW3 | PB13 | Input pull-up | Low |
 
-### PCB
+> L1/R1 are digital buttons, not analog triggers. The DS4 report carries `L2/R2 = 0xFF` when
+> pressed and `0x00` when released — there is no analog trigger travel on this hardware.
 
-Hardware files live in per-version folders; the current one is [`PCB/v0.1.0/`](./PCB/v0.1.0/) and covers three boards: **main board**, **Type-C daughter board** and **panel**.
+Buttons are debounced in firmware with a **4-frame consistency filter** (zero blocking,
+0.5 ms window at 8 kHz, 4 ms at 1 kHz, 16 ms at 250 Hz).
+
+### 2.6 Extra buttons (scanned, **not** mapped to the DS4 report)
+
+| Bit | Pin | GPIO mode | Active level | Status |
+|---|---|---|---|---|
+| BTN1 … BTN7 | PD1 … PD7 | Input pull-up | Low | Scanned into the button bitmap, **not** reported |
+| BTN8 | PB3 | Input pull-up | Low | Same; PB3 was JTDO, released by disabling JTAG |
+
+`INPUT_MASK_BTN1..8` are produced by `input_read_buttons()` but `gamepad.c` does not consume
+them, so they never reach the HID report. Mapping is reserved for a later hardware revision.
+
+### 2.7 Pins explicitly **not** used
+
+| Pin | Note |
+|---|---|
+| PA0 / PA2 (as LED/KEY) | Template leftovers from the v0.1.0 board — removed. PA0 is unused; PA2 is the debug UART TX |
+| PB4, PB5, PA15 | Released from JTAG (PB4/PA15) or simply unused (PB5) — not routed to anything in v0.2.0 |
+| PC0 – PC3, PE0, PE2 – PE6, PC10, PC12 | Old v0.1.0 button/stick pins, not connected on v0.2.0 |
+
+---
+
+## 3. Build & Flash
+
+### 3.1 Toolchain
+
+| Item | Requirement |
+|---|---|
+| IDE (recommended) | **MounRiver Studio 2.5.0 / 3.x** — the project ships `.cproject`, `.project`, `.wvproj` and a ready `obj/makefile` |
+| Compiler | `riscv-none-embed-gcc` (xPack GNU RISC-V Embedded GCC 8.2.0, bundled with MRS) |
+| Arch flags | `-march=rv32imacxw -mabi=ilp32 -Os` |
+| USB stack | TinyUSB 0.21 (git submodule at `TinyUSB/`) — run `git submodule update --init --recursive` after cloning |
+
+### 3.2 Build
+
+The MounRiver project is pre-generated; the makefile lives in `obj/`:
+
+```bash
+cd obj
+make -B all          # full rebuild
+```
+
+Expected output (firmware 0.1.0 / hardware v0.2.0):
+
+```text
+   text    data     bss     dec     hex  filename
+  27372     264   11792   39428    9a04  8khz-ds4-gamepad-ch32v307.elf
+```
+
+### 3.3 Outputs
 
 | File | Contents |
 |---|---|
-| `8khz-ds4-gamepad-ch32v307.epro2` | EDA project source, import it to keep editing |
-| `8khz-ds4-gamepad-ch32v307.zip` | Two schematic PDFs: `SCH_Schematic1_1-主板`, `SCH_Schematic2_1-小板` |
-| `main board.zip` | Main board Gerber (upload this one to order fabrication) |
-| `type-c board.zip` | Type-C daughter board Gerber |
-| `panel.zip` | Panelised Gerber — for fabricating several boards in one panel |
+| `obj/8khz-ds4-gamepad-ch32v307.elf` | ELF with debug symbols, for SWD download / debugging |
+| `obj/8khz-ds4-gamepad-ch32v307.hex` | Intel HEX, for WCH-LinkUtility / MounRiver flash tool |
+| `obj/8khz-ds4-gamepad-ch32v307.bin` | Raw binary (27636 bytes), flash at `0x08000000` |
+| `obj/8khz-ds4-gamepad-ch32v307.map` | Linker map (symbol → address) |
 
-All three Gerber packages are identical in structure, 16 files each: copper (GTL/GBL), silkscreen (GTO/GBO), solder mask (GTS/GBS), paste (GTP/GBP), board outline (GKO), drill drawing (GDL/GDD), PTH/NPTH/via drill files (DRL) and a flying-probe test file, plus a `PCB下单必读.txt` note — **upload the whole package to a PCB house and it is ready to order**.
+### 3.4 Flashing
 
-**Note that the v0.1.0 PCB uses the DS5 version of the analog stick module, and the board thickness should be 1.2 mm.**
+1. **SWD (recommended)** — connect **WCH-LinkE** to `PA13 (SWDIO)`, `PA14 (SWCLK)`, `GND`, `3V3`.
+   In MounRiver Studio press *Download*, or use WCH-LinkUtility to program the `.hex`.
+2. **USB ISP** — set the **BOOT0** switch to the high position, replug, then use
+   **WCHISPStudio** to download the `.bin`/`.hex` over USB. Restore BOOT0 to low and replug
+   to run the firmware.
 
-> BOM and pick-and-place files are not included; export them separately if you want full SMT assembly.
+After flashing, the first boot loads factory defaults if the config sectors are blank; the
+device enumerates as a DualShock 4 immediately.
 
-## Quick start
+---
 
-### Prerequisites
+## 4. Configuration & Calibration
 
-- **MounRiver Studio (MRS) 2.5.0** or newer, which bundles `riscv-none-embed-gcc`
-- Clone the sources (TinyUSB is a submodule, so `--recursive` is required):
+### 4.1 Entering configuration mode
 
-  ```bash
-  git clone --recursive https://github.com/P1nkDog/8khz-ds4-gamepad-ch32v307.git
-  ```
+1. Unplug the gamepad.
+2. **Hold the Share button (PB12)**.
+3. Plug the USB cable in while holding it, then release.
+4. The device enumerates as **`0331:0001` "DS4 Configurator"** — a USB CDC virtual serial port
+   (no driver needed on Windows 10+/Linux/macOS).
+5. Open the [web configurator](https://github.com/P1nkDog/ds4-gamepad-configurator), click
+   **Connect**, and pick the serial port.
 
-- For flashing, either a **WCH-Link** (download straight from MRS) or **any USB cable plus the web flasher**
+To get back to gamepad mode: unplug and replug **without** holding Share, or send the MSP
+reboot command from the page.
 
-### Build
+### 4.2 MSP v1 protocol
 
-1. MRS → `File` → `Import` → `Existing MounRiver Studio Project`, then pick this folder
-2. `Project` → `Build Project` (Ctrl+B)
-3. Output lands in `obj/`: `8khz-ds4-gamepad-ch32v307.hex` / `.elf` / `.map`
+Frame format (MSP v1, `$`-prefixed, XOR checksum):
 
-   > The file name is the MRS project name, taken from the `<name>` field in `.project` (`.cproject` uses `artifactName="${ProjName}"`) — **it does not depend on what the cloned folder is called**. This repo's project name is already `8khz-ds4-gamepad-ch32v307`; rename the project in MRS and the artifact name follows.
-
-There is no `Makefile` at the repo root: `obj/` (with `makefile`, `.o` and `.hex` inside) is generated by MRS on the first Build and is listed in `.gitignore` — **a fresh clone having no `obj/` is expected**. Building from a shell means pointing the toolchain at it yourself; using MRS is the normal path.
-
-### Flash
-
-**Option 1: web flasher (recommended, no tools to install, Windows)**
-
-1. Set **BOOT0** (under the board) to **1**
-2. Connect the board with a USB cable
-3. Use [Zadig](https://zadig.akeo.ie/) to bind the **WinUSB** driver to the device with `USB ID 4348 55E0` (once only)
-4. Open the **Flash** page of the [web configurator](https://github.com/P1nkDog/ds4-gamepad-configurator) → click **[Connect]** in the top right → pick "Unknown Device from WinChipHead"
-5. Choose `obj/8khz-ds4-gamepad-ch32v307.hex`, or a version listed under **Online flash** → **[Flash]**
-6. **Set BOOT0 back to 0 and power-cycle the board**
-
-**Option 2: MRS + WCH-Link**
-
-Hook up the WCH-Link and click `Download` in MRS (BOOT0 can stay at 0 — the WCH-Link goes through the debug port).
-
-**Option 3: WCHISPTool**
-
-The official Windows flashing tool: choose the USB transport → select `obj/8khz-ds4-gamepad-ch32v307.hex` → download. BOOT0 must be set to 1 first, same as above.
-
-## Project structure
-
-```
-8khz-ds4-gamepad-ch32v307/
-├── App/
-│   ├── main.c                  # main loop: tud_task + HID/CDC branch
-│   └── tusb_config.h           # TinyUSB config (HID + CDC, endpoint buffers)
-├── Bsp/
-│   ├── board_init.c/.h         # clocks, USBHS, LED, button, SysTick
-│   ├── Link.ld                 # linker script: 288K Flash + 32K RAM
-│   ├── ch32v30x_it.c           # interrupt handlers
-│   ├── system_ch32v30x.c       # system clock
-│   └── ch32v30x_conf.h         # peripheral library config
-├── Config/
-│   ├── config.c/.h             # config group registry, TLV serialisation, dual-sector switch
-│   ├── config_crc.h            # CRC16
-│   └── config_hal.c/.h         # Flash sector read/write (0x08046000 / 0x08047000)
-├── Core/                       # RISC-V core support (CSR / PFIC / SysTick)
-├── Driver/
-│   ├── ds4/                    # DS4 report descriptor + 64-byte input report
-│   ├── cdc/                    # CDC virtual serial port (configuration mode)
-│   ├── usb/                    # descriptor routing + HID/CDC mode selection
-│   ├── msp/                    # MSP v1 framing and command handling
-│   ├── input/                  # ADC stick sampling + button scanning
-│   ├── joystick/               # inversion, deadzone, full-scale mapping, calibration state machine
-│   ├── gamepad/                # gamepad state assembly (buttons → DS4 fields)
-│   └── timer/                  # TIM2 microsecond timer
-├── Peripheral/                 # CH32V30x standard peripheral library (28 modules)
-├── Startup/                    # startup code (D8C variant)
-├── TinyUSB/                    # TinyUSB submodule v0.21.0
-├── PCB/v0.1.0/                 # hardware project (EDA source / schematic PDFs / Gerber)
-├── obj/                        # build output (gitignored)
-├── README.md                   # English readme (this file)
-├── README.zh-CN.md             # Chinese readme
-└── LICENSE                     # GPL-3.0
+```text
+request : '$' 'M' '<' <size:1> <cmd:1> <payload:size> <crc:1>
+reply   : '$' 'M' '>' <size:1> <cmd:1> <payload:size> <crc:1>
+          crc = XOR of size, cmd and every payload byte
 ```
 
-## Firmware architecture
++ `size` ≤ 254, full frame ≤ 260 bytes.
++ Error replies also use the `>` direction byte, with `payload[0]` set to a status code —
+  **check the status byte, not the direction byte**.
++ Any partial frame (no new byte for 50 ms) is discarded automatically, so a dropped connection
+  can never leave the parser stuck.
 
-```
-App/main.c ── main loop (tud_task() polled continuously)
-│
-├─ HID mode (power up without holding Share)
-│    gamepad_process()
-│      ├─ input_read_buttons()   button scan (GPIO)
-│      ├─ joystick_process()     ADC → invert → deadzone → full-scale mapping
-│      └─ ds4_process()          build the 64-byte report
-│    → TinyUSB HID interrupt endpoint (bInterval=1 → 125 µs)
-│
-└─ CDC mode (power up holding Share)
-     cdc_process()
-       └─ msp_handler()          MSP v1 command parsing
-            ├─ CONFIG_GET/SET/SAVE/RESET   → Config
-            ├─ CALIB_START/SAMPLE/TRACK/END → joystick
-            ├─ JOYSTICK_RAW                 → raw stick values
-            └─ REBOOT                       → software reset
-     → TinyUSB CDC → browser Web Serial
-
-Config ── three config groups + TLV serialisation + CRC16 + alternating sectors (0x08046000 / 0x08047000)
-```
-
-**Boot order**: `board_init()` → `config_init()` (read Flash, verify, fall back to defaults) → `us_timer_init()` → `usb_desc_init()` (reads PB12 to pick the mode) → `tud_init()` → `gamepad_init()`.
-
-**Fixed-rate reporting**: the main loop uses the TIM2 microsecond counter and only runs `gamepad_process()` + `ds4_process()` when `micros() - last >= configured interval`. The interval comes from a lookup table indexed by the `polling_rate` config group (8k → 125 µs).
-
-**Modes are mutually exclusive**: `gamepad_process()` does not run in CDC mode, so no gamepad data is reported at all — that is a consequence of a USB device enumerating one configuration at a time, not a defect.
-
-## Web configurator
-
-[P1nkDog/ds4-gamepad-configurator](https://github.com/P1nkDog/ds4-gamepad-configurator) — a pure front-end page with two independent channels:
-
-| Purpose | Channel | Device state |
+| Code | Command | Payload → reply |
 |---|---|---|
-| Change settings, calibrate sticks | Web Serial (CDC) | Firmware running, CDC mode |
-| Flash firmware | WebUSB (WCH ISP, `4348:55E0`) | Firmware not running, chip in Bootloader |
+| `0x01` | MSP_API_VERSION | — → `[major, minor]` = `[0, 1]` |
+| `0x02` | MSP_FC_VARIANT | — → ASCII `"P1NKD-DS4"` |
+| `0x03` | MSP_FC_VERSION | — → `[0, 1, 0]` |
+| `0x04` | MSP_REBOOT | `['R']` → `[status]`, then the device resets |
+| `0x10` | MSP_CONFIG_GET | `[id]` → `[id, version, data…]` |
+| `0x11` | MSP_CONFIG_SET | `[id, data…]` → `[id, status]` (RAM only, not yet in Flash) |
+| `0x12` | MSP_CONFIG_SAVE | — → `[status]` (commits all dirty groups to Flash) |
+| `0x13` | MSP_CONFIG_RESET | `[id]` → `[id, status]` (reset one group to defaults, RAM only) |
+| `0x14` | MSP_CONFIG_STATUS | — → `[count][id, size_lo, size_hi] × count` |
+| `0x15` | MSP_JOYSTICK_RAW | — → `[4][raw LX,LY,RX,RY][mapped LX,LY,RX,RY]`, all u16 LE |
+| `0x16` | MSP_CALIB_START | — → `[status]` |
+| `0x17` | MSP_CALIB_SAMPLE | — → `[4][center LX,LY,RX,RY]`, u16 LE |
+| `0x18` | MSP_CALIB_TRACK | — → `[status]` |
+| `0x19` | MSP_CALIB_END | — → `[status][4][min,center,max ×4]` |
+| `0x1A` | MSP_CALIB_CANCEL | — → `[status]` |
 
-Configuration flow: hold **Share** while plugging in (or press **RST**) to enter CDC mode → open the page in the browser → click **[Connect]** → change settings → **[Save]** in the bottom bar (after changing the polling rate also click **[Reboot device]**).
+Status codes: `0` OK · `1` generic error · `2` invalid id · `3` invalid data · `4` flash error.
 
-## Configuration
+### 4.3 Configuration groups
 
-### Config groups
+| ID | Group | Size | Fields | Validation |
+|---|---|---|---|---|
+| 1 | `joystick_calib` | 24 B | 4 × (`min`, `center`, `max`) u16 | `min < center < max ≤ 4095` for every axis |
+| 2 | `gamepad_settings` | 2 B | `deadzone` (%) | `0 … 50` |
+| 3 | `polling_rate` | 1 B | `level` | `0 … 5` (250 / 500 / 1k / 2k / 4k / 8k Hz) |
 
-| ID | Name | Struct | Version | Default | Notes |
-|---|---|---|---|---|---|
-| 1 | `joystick_calib` | `JoystickCalibConfig` | 1 | all axes `min=0 / center=2048 / max=4095` | per-axis calibration |
-| 2 | `gamepad_settings` | `GamepadSettings` | 1 | `deadzone = 1` (%) | the deadzone is **shared by the whole gamepad** |
-| 3 | `polling_rate` | `PollingRateConfig` | 1 | `POLL_RATE_1000` | six levels: 250 / 500 / 1k / 2k / 4k / 8k |
+Illegal values are rejected **before** they reach RAM (`MSP_STATUS_INVALID_DATA`), and a save is
+refused outright if any group is currently invalid, so corrupted parameters can never be written
+into Flash under a valid CRC.
 
-Storage is TLV: a header (magic `0xCF07` + version + count) → a number of records (type / length / version / flags / data) → a terminator. On read, records whose version does not match are ignored and the defaults are used, so bump the version whenever the struct changes.
+### 4.4 Stick calibration
 
-### Stick processing
+Five steps, each driven from the page:
 
-1. **ADC sampling** → raw 12-bit value
-2. **Hardware inversion** (some potentiometers are wired the other way, normalised here)
-3. **Deadzone**: relative to `center`, anything inside the deadzone outputs the midpoint `2048`
-4. **Full-scale mapping outside the deadzone**: `[center ± dz, min/max]` is stretched linearly to `[0, 2048]` / `[2048, 4095]`, so pushing to the limit really reaches full scale
-5. **Four-step calibration** (matching `CALIB_START / SAMPLE / TRACK / END`): sample the centre (16-sample average) → track each axis's extremes → write back to config and save
+1. `CALIB_START` — snapshots the current calibration (rollback point), state → `START`.
+2. **Centre the stick**, then `CALIB_SAMPLE` — averages 16 frames per axis, state → `CENTER_SAMPLED`.
+   During this state the axis output is forced to mid-scale, so the preview never shows a
+   half-range jump while `min/max` are still the old values.
+3. `CALIB_TRACK` — state → `TRACKING`; the firmware then tracks per-axis min/max in RAM only
+   (the active config keeps the previous valid calibration until the end).
+4. **Roll both sticks to all extremes**, then `CALIB_END` — checks `min < center < max` and a
+   minimum travel of 200 ADC counts per side, runs the config validator, and only then marks the
+   group dirty and writes Flash. Any check failure rolls back to the snapshot and reports an error.
+5. `CALIB_CANCEL` — roll back at any point and return to `IDLE`.
 
-### TinyUSB configuration
+Out-of-order commands are rejected with a status error instead of being silently accepted, so the
+page can always tell whether a step actually ran.
 
-Key entries in `App/tusb_config.h`:
+### 4.5 Polling rate — restart required
 
-| Macro | Value | Purpose |
-|---|---|---|
-| `CFG_TUD_HID` / `CFG_TUD_CDC` | 1 / 1 | both device classes compiled in, chosen by mode at runtime |
-| `CFG_TUD_ENDPOINT0_SIZE` | 64 | control endpoint |
-| `CFG_TUD_HID_EP_BUFSIZE` | 64 | matches the DS4 report length |
-| `CFG_TUD_CDC_*_BUFSIZE` | 512 high-speed / 64 full-speed | serial buffers |
-| `CFG_TUSB_OS` | `OPT_OS_NONE` | bare metal (no RTOS); `tud_task()` is polled from the main loop |
+The rate is baked into the HID **`bInterval`** field of the configuration descriptor
+(`bInterval = 6 - level`: 250 Hz → 6, 8 kHz → 1). The descriptor is built during enumeration, so:
 
-### Button mapping
+> **After changing the polling rate you must send `MSP_REBOOT` (the page's “Reboot device”
+> button) — or replug — for the new rate to take effect.**
 
-Physical button → DS4 field, hard-coded in `Driver/gamepad/gamepad.c`:
+The rate is never applied at runtime because the host only reads `bInterval` during enumeration.
+Deadzone and calibration, by contrast, are applied to the next report immediately.
 
-| Button | DS4 field | Button | DS4 field |
+Notes for real-world 8 kHz:
++ The host must support High-Speed interrupt polling at 125 µs (Linux `usbhid` does; Windows
+  behaviour depends on the controller driver).
++ The cable and hub must be genuine High-Speed (480 Mbps). On a Full-Speed port the device still
+  works, but the actual rate degrades to 1 ms.
++ The send path is token-driven: a new report is only built when the previous transfer completed,
+  so the effective rate is exactly the host's polling rate — never a burst.
+
+### 4.6 Flash storage layout
+
+| Region | Address | Size | Contents |
 |---|---|---|---|
-| □ / X (PB11) | `buttonWest` | L1 (PE7) | `buttonL1` |
-| × / A (PE13) | `buttonSouth` | R1 (PB10) | `buttonR1` |
-| ○ / B (PE14) | `buttonEast` | L2 (PB0) | `buttonL2` |
-| △ / Y (PE15) | `buttonNorth` | R2 (PB1) | `buttonR2` |
-| Share (PB12) | `buttonSelect` | L3 (PA5) | `buttonL3` |
-| Options (PB14) | `buttonStart` | R3 (PE1) | `buttonR3` |
-| PS (PE12) | `buttonHome` | D-pad | `dpad` (8 directions) |
-| Touchpad (PB13) | `buttonTouchpad` | | |
+| Firmware | `0x08000000` – `0x0803DFFF` | ≤ 248 KB | Code + rodata; a linker `ASSERT` fails the build if the image ever reaches the config sector |
+| Config A (primary) | `0x0803E000` | 4 KB | `ConfigHeader{magic 0xCF07, version 1, count}` + TLV records + footer + CRC16 |
+| Config B (staging) | `0x0803F000` | 4 KB | Same layout, written first on every save |
 
-## Status
+Save sequence: build the image in RAM → **byte-compare with sector A and skip the whole erase if
+nothing changed** (Flash endurance protection) → erase B, program B, verify B → erase A, program A,
+verify A. At every instant one of the two sectors holds a complete, CRC-valid image; boot prefers
+A and falls back to B. Records whose length or content fails validation are skipped, leaving the
+factory default for that group.
 
-**Implemented**
+---
 
-- DS4 HID reporting (64 bytes: sticks, buttons, D-pad, PS / Touchpad)
-- Fixed-rate reporting up to 8 kHz (USB High-Speed), six selectable levels
-- CDC configuration mode + MSP v1 (15 commands)
-- Dual-sector config storage with CRC and power-loss fallback
-- Per-axis calibration and deadzone mapping
-- Browser-side settings, calibration and flashing
+## 5. DS4 report layout (for reference)
 
-**Not implemented / known limitations**
+Input report ID `0x01`, 64 bytes total (63-byte payload as declared in the report descriptor):
 
-- Extra buttons BTN1–BTN8 are scanned but never reported (the DS4 input report has no field for them)
-- Triggers are **digital** switches with no analog travel, so there are no trigger curves
-- Button mapping is hard-coded; no macros, rapid fire or remapping
-- The deadzone is a single global value; left and right sticks cannot be set separately
-- Configuration mode and gamepad mode are mutually exclusive; switching requires re-plugging
-- No gyroscope / accelerometer; Touchpad only reports the click, no coordinates
-
-## References
-
-| Source | Used for |
+| Byte | Content |
 |---|---|
-| [TinyUSB](https://github.com/hathach/tinyusb) | USB stack (including the WCH CH32 USBHS driver) |
-| [wchisp-web](https://github.com/P1nkDog/wchisp-web) | Web-side WCH ISP flashing implementation (belongs to the configurator repo, not this firmware) |
-| [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE) | Gamepad feature set and button layout reference |
-| [Betaflight](https://github.com/betaflight/betaflight) | Config group / MSP protocol design reference |
-| DualShock 4 report descriptor | Based on a descriptor captured from real hardware |
+| 0 | Report ID `0x01` |
+| 1–4 | Left X, Left Y, Right X, Right Y (0–255, centre 128) |
+| 5 | D-pad low nibble (0=N, 1=NE … 7=NW, 0x0F=neutral) + □ × ○ △ in bits 4–7 |
+| 6 | L1, R1, L2, R2, Share, Options, L3, R3 |
+| 7 | PS (bit 0), Touchpad (bit 1), 6-bit rolling report counter (bits 2–7) |
+| 8–9 | Left / right trigger (0x00 or 0xFF on this hardware) |
+| 10–63 | Vendor area: IMU/touchpad/battery fields. Byte 30 is set to `0x1B` (battery full, USB) |
 
-## License
+Feature reports returned for host hand-shaking: `0x02` calibration (36 B), `0x03` definition
+(47 B), `0x12` MAC (15 B), `0xA3` version/date (48 B), `0xF2` signing state (15 B), `0xF3` reset
+auth (7 B). `0xF1` (signature nonce) is STALLed on purpose — no real authentication is implemented.
 
-[GPL-3.0-only](./LICENSE). Free to use, modify and redistribute, but derivative works must also be released under GPL-3.0, with no warranty.
+---
 
-## Acknowledgements
+## 6. Directory structure
 
-- [TinyUSB](https://github.com/hathach/tinyusb) — the USB stack; device classes, endpoint management and the WCH port layer all come from it
-- WCH (沁恒微电子) — the [CH32V307 chip, the standard peripheral library and official examples](https://www.wch.cn/products/CH32V307.html)
-- [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE), [Betaflight](https://github.com/betaflight/betaflight) — sources of inspiration for the button layout and configuration system
+```text
+App/          main loop, TinyUSB configuration (tusb_config.h)
+Bsp/          board init, IRQ vectors (USBHS/TIM2), clock tree, Link.ld
+Config/       config registry, TLV + CRC16 storage, Flash HAL
+Driver/
+  ds4/        DS4 report packing, report descriptor, feature reports
+  gamepad/    button/d-pad mapping into GamepadState
+  input/      GPIO button scan (with debounce) + ADC stick sampling
+  joystick/   calibration state machine, deadzone / full-scale mapping
+  msp/        MSP v1 state machine + command dispatch
+  cdc/        CDC pipe, feeds bytes into the MSP parser
+  usb/        descriptor routing (HID vs CDC), device stack init
+  timer/      TIM2 microsecond timebase (micros())
+  stat/       optional block-time profiler (compiled out by default)
+Core/         RISC-V core support (PFIC/NVIC helpers, CSR accessors)
+Debug/        delay routines and printf retarget (USART2)
+Startup/      startup_ch32v30x_D8C.S (interrupt vector table, reset handler)
+Peripheral/   WCH CH32V30x standard peripheral library
+TinyUSB/      TinyUSB 0.21 (git submodule)
+obj/          build output (git-ignored)
+Docs/         archived design notes — historical, may be outdated
+PCB/          hardware releases (v0.1.0, v0.2.0)
+```
+
+---
+
+## 7. Attribution & license
+
+This firmware stands on the shoulders of these open projects:
+
++ **[TinyUSB](https://github.com/hathach/tinyusb)** — Ha Thach (hathach) and contributors.
+  The USB device stack, the WCH CH32V307 USBHS port and the HID/CDC class drivers all come from
+  TinyUSB 0.21 (MIT).
++ **WCH / 南京沁恒微电子** — CH32V30x standard peripheral library, startup code and the USBHS
+  clock/PLL bring-up sequence, taken from the CH32V307 EVT examples.
++ **[GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE)** — reference for the DS4 report
+  descriptor, the feature-report hand-shaking data and the “report ID embedded in the payload”
+  transmission trick.
++ The DS4/PS4 protocol research community — the report layout and the authentication hand-shake
+  behaviour documented by various reverse-engineering projects.
++ **[betaflight](https://github.com/betaflight/betaflight)** — inspiration for the parameter-group
+  (TLV + validation callback) configuration design.
+
+Released under the **MIT License** — see [LICENSE](LICENSE).
+`Peripheral/`, `Core/`, `Startup/` and `Debug/` are derived from WCH's EVT packages and keep their
+original copyright headers.

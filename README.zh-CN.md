@@ -1,296 +1,364 @@
-# CH32V307 DS4 8K 手柄
+# CH32V307 DS4 8K 手柄 — v0.2.0
 
-> 8000Hz 回报率的 PS4 DualShock 4 手柄完整方案：固件 + PCB + 网页配置器
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-`v0.1.0` · 配套网页配置器：[P1nkDog/ds4-gamepad-configurator](https://github.com/P1nkDog/ds4-gamepad-configurator)
+基于 **WCH CH32V307VCT6**（RISC-V RV32IMACXW @ 144 MHz）与 **TinyUSB 0.21** 的
+高速 USB 2.0（480 Mbps）**PS4 DualShock 4 兼容手柄**固件。采用芯片原生高速口，
+HID 中断端点最小可到 `bInterval = 1`，即 **125 µs 一帧（8 kHz 回报率）**。
 
-[English](./README.md) | 中文
+完整方案包括：固件（本仓库）+ PCB（`PCB/v0.2.0`）+ 网页配置器。
+
+配套网页配置器：[P1nkDog/ds4-gamepad-configurator](https://github.com/P1nkDog/ds4-gamepad-configurator)
+
+- **固件版本**：0.1.0（可通过 MSP 命令查询）
+- **硬件版本**：v0.2.0（**本文档的引脚表是唯一标准**）
+
+> ⚠️ **本文档第 2 节的引脚映射对应 v0.2.0 正式版 PCB，已上板实测确认。**
+> `Docs/` 目录下的旧文档（例如 `引脚重映射修改指南_2026-10-10.md`）仅作历史归档保留，
+> 其引脚/极性与实际硬件**冲突**，请勿再按旧文档接线或改代码。
 
 ---
 
-## 功能特性
+## 1. 项目简介与核心特性
 
-- **8kHz 回报率**：走 CH32V307 的 USB 高速口（480 Mbps），HID 端点 `bInterval = 1` 即 125 µs。可在 250 / 500 / 1k / 2k / 4k / 8k 六档间配置，默认 1k
-- **原生 DS4 设备**：按 DualShock 4 实现报告描述符与 64 字节输入报告，主机直接识别为 PS4 手柄，不需要驱动或按键映射软件
-- **HID / CDC 双模式**：上电瞬间读 Share 键（PB12）决定这次启动做手柄还是做串口配置设备
-- **MSP v1 配置协议**：15 条命令，覆盖版本查询、配置读写、摇杆实时值、分步校准、设备重启
-- **配置存 Flash**：双扇区交替写入（`0x08046000` / `0x08047000`）+ magic `0xCF07` + CRC16 校验，断电写坏可回退另一块
-- **摇杆处理**：四轴各自校准（min / center / max）、ADC 取反、死区、死区外满量程映射
-- **网页可配**：死区、四轴校准、回报率都能在浏览器里改，走 Web Serial，无需装驱动
-
-> 8kHz 需主机与线材都支持 USB 高速；实际速率受主机 USB 调度影响，插到全速口上会自然降级。
-
-## 硬件
-
-### 主控与关键器件
-
-| 项 | 说明 |
+| 特性 | 说明 |
 |---|---|
-| 主控 | CH32V307VCT6（RISC-V RV32IMACXW，288K Flash / 32K RAM，内置 USBHS PHY） |
-| USB | USB 2.0 高速（480 Mbps），设备描述符 `bcdUSB = 0x0200` |
-| 摇杆 | 双模拟摇杆，ADC1 采样 |
-| 按键 | 轻触开关 + 1 个 BOOT0 拨动开关 |
-| 板载 LED / 独立按键 | 代码预留 PA0（LED，低电平点亮）/ PA2（按键），**当前板未引出**，见 `Bsp/board.h` |
+| 回报率 | 250 / 500 / 1000 / 2000 / 4000 / 8000 Hz 六档，可在网页里切换（默认 **1000 Hz**）。实现方式是改 HID 描述符的 `bInterval`（`6 - 档位`），8 kHz 即 125 µs 一帧 |
+| 原生 DS4 身份 | 报告描述符与 64 字节输入报告严格按 DualShock 4 规范实现，主机识别为 `054C:09CC` DualShock 4，无需驱动、无需映射软件 |
+| 双模式启动 | 直接插线 → **DS4 HID 手柄模式**；按住 **Share(PB12)** 插线 → **CDC 配置模式**（虚拟串口，给网页工具用） |
+| 摇杆处理 | 12-bit ADC 采样，四轴独立 `min / center / max` 校准，死区 0~50%，死区外满量程映射，参数存 Flash |
+| 参数存储 | 两个 4 KB Flash 扇区（`0x0803E000` / `0x0803F000`），magic `0xCF07` + CRC16-CCITT，先写备份区 B 再提交主区 A，写入过程掉电始终有一份完整数据 |
+| MSP v1 协议 | 15 条命令：版本查询、配置读/写/保存/复位/状态、摇杆实时值、五步校准、设备重启 |
+| 确定性发送 | 发送完全由主机令牌驱动（端点完成回调解锁），没有软件节拍循环，不存在报文撕裂 |
+| 诊断能力 | 可选的代码段耗时统计（`Driver/stat`，默认编译为空），丢帧计数可经 MSP/串口读出 |
 
-### 引脚定义
+---
 
-**摇杆（ADC1）**
+## 2. 硬件规格与引脚映射
 
-| 轴 | 引脚 | ADC 通道 |
+### 2.1 MCU 与关键器件
+
+| 项目 | 参数 |
+|---|---|
+| MCU | CH32V307VCT6 — RISC-V 青稞 V4F，RV32IMACXW，144 MHz，288 KB Flash / 32 KB RAM（LQFP-100） |
+| USB | USB 2.0 高速设备（480 Mbps），片内高速 PHY，`bcdUSB = 0x0200` |
+| 摇杆 | 双摇杆，ADC1 轮询采样（未用 DMA） |
+| 按键 | 主板轻触开关 + FPC 按键板（二选一/并联，MCU 侧引脚相同）；另有 1 个 BOOT0 拨动开关 |
+| 存储 | 片内 Flash，划出 2 × 4 KB 扇区存放参数 |
+| LED | **无**。v0.2.0 主板没有板载用户 LED，`board_led_write()` 是刻意的空实现 |
+
+### 2.2 时钟树
+
+| 时钟域 | 频率 | 说明 |
 |---|---|---|
-| 左摇杆 X | PC4 | ADC14 |
-| 左摇杆 Y | PC5 | ADC15 |
-| 右摇杆 X | PA7 | ADC7 |
-| 右摇杆 Y | PA6 | ADC6 |
+| HSE | 8 MHz | 外部晶振 |
+| SYSCLK / HCLK | 144 MHz | PLL = HSE × 18 |
+| PCLK1（APB1） | 72 MHz | HCLK / 2 —— USART2（调试串口）、TIM2（×2 = 144 MHz 定时器时钟） |
+| PCLK2（APB2） | 72 MHz | HCLK / 2 —— 刻意降频，使 **ADC = 72 / 8 = 9 MHz**，严格落在数据手册 14 MHz 上限之内 |
+| USBHS | 480 MHz | USBHS PLL 参考时钟 = HSE/2 = 4 MHz |
+| ADC1 | 9 MHz | `RCC_ADCCLKConfig(RCC_PCLK2_Div8)`；71.5 + 12.5 = 84 个 ADC 周期 ≈ **9.3 µs/通道**，四通道约 37 µs/帧 |
 
-**按键（低电平有效，内部上拉）**
+> 为什么 PCLK2 不跑 144 MHz：ADC 时钟只能由 PCLK2 做 /2…/8 分频（`CFGR0.ADCPRE` 仅 2 位，
+> 没有 /16），PCLK2 = 144 MHz 时最低只能到 18 MHz，超出手册 fADC ≤ 14 MHz 上限 28%。
+> 降到 72 MHz 后 ADC = 9 MHz 完全合规；本项目 APB2 上只挂了 GPIO/ADC（USART1 未使用），
+> 降频没有任何功能代价。
 
-| 功能 | 引脚 | 功能 | 引脚 |
+### 2.3 USB、调试与模式选择引脚
+
+| 功能 | 引脚 | 说明 |
+|---|---|---|
+| USBHS D− | PB6 | USBHS 固定引脚，片内 PHY |
+| USBHS D+ | PB7 | |
+| SWDIO | PA13 | 调试口，保留可用（只关 JTAG、不动 SWD） |
+| SWCLK | PA14 | 调试口，保留可用 |
+| JTAG（JTDO/NJTRST/JTDI） | PB3 / PB4 / PA15 | 通过 `AFIO_PCFR1.SWJ_CFG = 010` **释放为普通 GPIO**，SWD 不受影响。其中 PB3 复用为 `BTN8` |
+| 模式选择 | PB12 | 上电瞬间采样一次：**低电平 = CDC 配置模式**，高电平 = DS4 HID 模式。与 Share 键共用同一引脚 |
+| 调试串口 TX | PA2 | `USART2_TX`，115200 8N1，printf 重定向（`Debug/debug.h` 中 `DEBUG = DEBUG_UART2`）。v0.2.0 主板未引出该引脚，需要看日志时自行飞线 |
+
+### 2.4 摇杆（ADC1）
+
+| 轴 | 引脚 | ADC 通道 | 方向处理 |
 |---|---|---|---|
-| 十字上 | PE9 | L1 | PE7 |
-| 十字下 | PE11 | R1 | PB10 |
-| 十字左 | PE10 | L2 | PB0 |
-| 十字右 | PE8 | R2 | PB1 |
-| △ / Y | PE15 | 左摇杆按下（L3） | PA5 |
-| ○ / B | PE14 | 右摇杆按下（R3） | PE1 |
-| × / A | PE13 | PS | PE12 |
-| □ / X | PB11 | Touchpad（SW3） | PB13 |
-| Options / Start（SW4） | PB14 | Share / Select（SW2） | PB12 |
+| 左摇杆 X（LX） | PC4 | `ADC_Channel_14` | **固件取反**（`v = 4095 - v`） |
+| 左摇杆 Y（LY） | PC5 | `ADC_Channel_15` | 直通 |
+| 右摇杆 X（RX） | **PA5** | `ADC_Channel_5` | **固件取反**（`v = 4095 - v`） |
+| 右摇杆 Y（RY） | PA6 | `ADC_Channel_6` | 直通 |
 
-**拓展按键（已扫描，尚未上报给 DS4）**
+PA5/PA6、PC4/PC5 配置为 `GPIO_Mode_AIN`。四路转换串行轮询，带**有界超时保护**
+（约 400 µs 上限，超时返回该通道上一次有效值），ADC 异常不会把主循环拖死。
 
-| 编号 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-|---|---|---|---|---|---|---|---|---|
-| 引脚 | PD3 | PD4 | PD5 | PD6 | PD7 | PB3 | PB4 | PE0 |
+> 注意：两个摇杆的 X/Y 网络名在原理图上是交叉的（左摇杆 X 接 `JS2.Y_OUT`），
+> 上表是实测确认后的**逻辑轴**映射，不要按网表引脚名直译。
 
-**开关**
+### 2.5 按键
 
-| 器件 | 功能 | 说明 |
-|---|---|---|
-| SW5 | BOOT0 | 拨到 **1** → 3.3V，上电进芯片 Bootloader（烧录用）；拨回 **0** → GND，正常运行固件 |
-| SW2 | Share / Select | **按住上电**（把 PB12 拉低）→ 以 CDC 配置模式启动；松着上电 → HID 手柄模式 |
+**除 L1、R1 外，所有按键均为内部上拉 + 低电平有效；L1 与 R1 为内部下拉 + 高电平有效**
+（这两个网络板上没有外部上/下拉电阻）。
 
-### PCB
+| DS4 功能 | 网络名 | 引脚 | GPIO 模式 | 有效电平 |
+|---|---|---|---|---|
+| 十字上 | UP | PE9 | 内部上拉 | 低 |
+| 十字下 | DOWN | PE11 | 内部上拉 | 低 |
+| 十字左 | LEFT | PE10 | 内部上拉 | 低 |
+| 十字右 | RIGHT | PE8 | 内部上拉 | 低 |
+| △ 三角（North） | Y | PE15 | 内部上拉 | 低 |
+| ○ 圆圈（East） | B | PE14 | 内部上拉 | 低 |
+| × 叉（South） | A | PE13 | 内部上拉 | 低 |
+| □ 方块（West） | X | PB11 | 内部上拉 | 低 |
+| **L1** | L1 | **PE7** | **内部下拉** | **高** |
+| **R1** | R1 | **PB10** | **内部下拉** | **高** |
+| L2（数字） | L2 | PB0 | 内部上拉 | 低 |
+| R2（数字） | R2 | PB1 | 内部上拉 | 低 |
+| L3（左摇杆按下） | JS2 S3/S4 | **PA7** | 内部上拉 | 低 |
+| R3（右摇杆按下） | JS1 S3/S4 | PE1 | 内部上拉 | 低 |
+| PS / Home | PS | PE12 | 内部上拉 | 低 |
+| Share / Select | SW2 | PB12 | 内部上拉 | 低（同时是启动模式选择脚） |
+| Options / Start | SW4 | PB14 | 内部上拉 | 低 |
+| Touchpad 点击 | SW3 | PB13 | 内部上拉 | 低 |
 
-硬件工程按版本分目录存放，当前版本为 [`PCB/v0.1.0/`](./PCB/v0.1.0/)，共三块板：**主板**、**Type-C 小板**、**拼板**。
+> L1/R1 是数字按键，不是模拟扳机。DS4 报告里 L2/R2 只有 `0xFF`（按下）和 `0x00`（松开）
+> 两种取值——本硬件没有扳机行程。
+
+按键在固件里做 **4 帧一致性消抖**（零阻塞；8 kHz 下等效稳定窗 0.5 ms，1 kHz 下 4 ms，
+250 Hz 下 16 ms）。
+
+### 2.6 扩展按键（仅扫描，**未**映射到 DS4 报告）
+
+| 位 | 引脚 | GPIO 模式 | 有效电平 | 状态 |
+|---|---|---|---|---|
+| BTN1 … BTN7 | PD1 … PD7 | 内部上拉 | 低 | 进入按键位图，**不上报** |
+| BTN8 | PB3 | 内部上拉 | 低 | 同上；PB3 原为 JTDO，已关 JTAG 释放 |
+
+`input_read_buttons()` 会产出 `INPUT_MASK_BTN1..8`，但 `gamepad.c` 不消费这些位，
+因此永远不会进入 HID 报告。映射关系留给后续硬件版本确定。
+
+### 2.7 明确**未**使用的引脚
+
+| 引脚 | 说明 |
+|---|---|
+| PA0 / PA2（原 LED/KEY） | v0.1.0 模板遗留，已移除。PA0 空置；PA2 现为调试串口 TX |
+| PB4、PB5、PA15 | PB4/PA15 已从 JTAG 释放、PB5 本就未用；三者均未接到任何器件 |
+| PC0 ~ PC3、PE0、PE2 ~ PE6、PC10、PC12 | v0.1.0 的旧按键/摇杆引脚，v0.2.0 未连接 |
+
+---
+
+## 3. 编译与烧录
+
+### 3.1 工具链要求
+
+| 项目 | 要求 |
+|---|---|
+| IDE（推荐） | **MounRiver Studio 2.5.0 / 3.x** —— 仓库已带 `.cproject`、`.project`、`.wvproj` 和生成好的 `obj/makefile` |
+| 编译器 | `riscv-none-embed-gcc`（xPack GNU RISC-V Embedded GCC 8.2.0，MRS 自带） |
+| 架构参数 | `-march=rv32imacxw -mabi=ilp32 -Os` |
+| USB 协议栈 | TinyUSB 0.21（git 子模块 `TinyUSB/`），克隆后先执行 `git submodule update --init --recursive` |
+
+### 3.2 编译
+
+工程是 MounRiver 预生成的，`obj/` 下已带 makefile：
+
+```bash
+cd obj
+make -B all          # 全量重编
+```
+
+正常的体积输出（固件 0.1.0 / 硬件 v0.2.0）：
+
+```text
+   text    data     bss     dec     hex  filename
+  27372     264   11792   39428    9a04  8khz-ds4-gamepad-ch32v307.elf
+```
+
+### 3.3 产物说明
 
 | 文件 | 内容 |
 |---|---|
-| `8khz-ds4-gamepad-ch32v307.epro2` | EDA 工程源文件，可直接导入继续改图 |
-| `8khz-ds4-gamepad-ch32v307.zip` | 原理图 PDF ×2：`SCH_Schematic1_1-主板`、`SCH_Schematic2_1-小板` |
-| `main board.zip` | 主板 Gerber（打样直接上传这个包） |
-| `type-c board.zip` | Type-C 小板 Gerber |
-| `panel.zip` | 拼板（panel）Gerber——多块板拼在一起打样时用 |
+| `obj/8khz-ds4-gamepad-ch32v307.elf` | 带调试符号的 ELF，用于 SWD 下载/在线调试 |
+| `obj/8khz-ds4-gamepad-ch32v307.hex` | Intel HEX，用于 WCH-LinkUtility / MounRiver 烧录 |
+| `obj/8khz-ds4-gamepad-ch32v307.bin` | 纯二进制（27636 字节），烧到 `0x08000000` |
+| `obj/8khz-ds4-gamepad-ch32v307.map` | 链接映射表（符号 → 地址） |
 
-三个 Gerber 包内容一致，各 16 个文件：铜层（GTL/GBL）、丝印（GTO/GBO）、阻焊（GTS/GBS）、钢网（GTP/GBP）、板框（GKO）、钻孔图（GDL/GDD）、PTH/NPTH/过孔钻孔（DRL）、飞针测试文件，并附 `PCB下单必读.txt`——**直接整包上传打板厂即可下单**。
+### 3.4 烧录方法
 
-**需要注意的是，v0.1.0版本的PCB使用的是DS5版本的摇杆，板厚应为1.2mm**
+1. **SWD（推荐）**：把 **WCH-LinkE** 接到 `PA13(SWDIO)`、`PA14(SWCLK)`、`GND`、`3V3`，
+   在 MounRiver Studio 里点 *Download*，或用 WCH-LinkUtility 烧 `.hex`。
+2. **USB ISP**：把 **BOOT0 拨到高电平**后重新插线，用 **WCHISPStudio** 通过 USB 烧
+   `.bin`/`.hex`；烧完把 BOOT0 拨回低电平再插线运行。
 
-> 目前没有 BOM 和贴片坐标文件，要整板 SMT 贴片需要另外导出。
+首次烧录后如果配置扇区是空的，会自动加载出厂默认值，设备立刻枚举成 DualShock 4。
 
-## 快速开始
+---
 
-### 前置条件
+## 4. 配置与校准
 
-- **MounRiver Studio（MRS）2.5.0** 或更新版本，自带 `riscv-none-embed-gcc`
-- 克隆源码（TinyUSB 是子模块，必须带 `--recursive` 一并拉取）：
+### 4.1 进入 CDC 配置模式
 
-  ```bash
-  git clone --recursive https://github.com/P1nkDog/8khz-ds4-gamepad-ch32v307.git
-  ```
+1. 拔掉手柄。
+2. **按住 Share 键（PB12）不放**。
+3. 插上 USB 线，插好后松开。
+4. 设备枚举为 **`0331:0001` "DS4 Configurator"** —— 一个 USB CDC 虚拟串口
+   （Windows 10+/Linux/macOS 都免驱）。
+5. 打开[网页配置器](https://github.com/P1nkDog/ds4-gamepad-configurator)，点 **连接**，
+   选中对应串口。
 
-- 烧录二选一：**WCH-Link**（MRS 里直接 Download）或**任意 USB 线 + 网页烧录**
+回到手柄模式：不按 Share 拔插一次，或在网页上发 **重启设备**（MSP_REBOOT）。
 
-### 编译
+### 4.2 MSP v1 协议
 
-1. MRS → `File` → `Import` → `Existing MounRiver Studio Project`，选中本目录
-2. `Project` → `Build Project`（Ctrl+B）
-3. 产物在 `obj/`：`8khz-ds4-gamepad-ch32v307.hex` / `.elf` / `.map`
+帧格式（MSP v1，`$` 开头，异或校验）：
 
-   > 文件名 = MRS 工程名，取自 `.project` 的 `<name>` 字段（`.cproject` 用 `artifactName="${ProjName}"`），**与克隆目录叫什么无关**。本仓库的工程名已设为 `8khz-ds4-gamepad-ch32v307`；若你在 MRS 里重命名工程，产物名会跟着变。
-
-工程根目录没有 `Makefile`：`obj/`（含 `makefile`、`.o`、`.hex`）是 MRS 首次 Build 时自动生成的，且已在 `.gitignore` 里——**刚克隆下来没有 `obj/` 属正常**。命令行手动编译需自行指定工具链路径，一般直接用 MRS 即可。
-
-### 烧录
-
-**方式一：网页烧录（推荐，免装工具，Windows）**
-
-1. 主板底下 **BOOT0 拨到 1**
-2. USB 线连接电脑
-3. 用 [Zadig](https://zadig.akeo.ie/) 给 `USB ID 4348 55E0` 的设备装 **WinUSB** 驱动（只需一次）
-4. 打开[网页配置器](https://github.com/P1nkDog/ds4-gamepad-configurator)的「固件烧录」页 → 右上角 **[连接]** → 选「来自 WinChipHead 的未知设备」
-5. 选择 `obj/8khz-ds4-gamepad-ch32v307.hex`，或用「在线烧录」里列出的版本 → **[烧录]**
-6. **BOOT0 拨回 0，重新上电**
-
-**方式二：MRS + WCH-Link**
-
-接好 WCH-Link → MRS 点 `Download`（BOOT0 保持 0 即可，WCH-Link 走调试口）。
-
-**方式三：WCHISPTool**
-
-Windows 下的官方烧录工具，选 USB 方式 → 选 `obj/8khz-ds4-gamepad-ch32v307.hex` → 下载。同样需要先把 BOOT0 拨到 1。
-
-## 项目结构
-
-```
-8khz-ds4-gamepad-ch32v307/
-├── App/
-│   ├── main.c                  # 主循环：tud_task + HID/CDC 分支
-│   └── tusb_config.h           # TinyUSB 配置（HID + CDC、端点缓冲）
-├── Bsp/
-│   ├── board_init.c/.h         # 时钟、USBHS、LED、按键、SysTick
-│   ├── Link.ld                 # 链接脚本：288K Flash + 32K RAM
-│   ├── ch32v30x_it.c           # 中断服务
-│   ├── system_ch32v30x.c       # 系统时钟
-│   └── ch32v30x_conf.h         # 外设库配置
-├── Config/
-│   ├── config.c/.h             # 配置组注册、TLV 序列化、双扇区切换
-│   ├── config_crc.h            # CRC16
-│   └── config_hal.c/.h         # Flash 扇区读写（0x08046000 / 0x08047000）
-├── Core/                       # RISC-V 内核支持（CSR / PFIC / SysTick）
-├── Driver/
-│   ├── ds4/                    # DS4 报告描述符 + 64 字节输入报告
-│   ├── cdc/                    # CDC 虚拟串口（配置模式）
-│   ├── usb/                    # 描述符路由 + HID/CDC 模式选择
-│   ├── msp/                    # MSP v1 帧编解码与命令处理
-│   ├── input/                  # ADC 摇杆采样 + 按键扫描
-│   ├── joystick/               # 取反、死区、满量程映射、校准状态机
-│   ├── gamepad/                # 手柄状态组装（按键 → DS4 字段）
-│   └── timer/                  # TIM2 微秒定时器
-├── Peripheral/                 # CH32V30x 标准外设库（28 个模块）
-├── Startup/                    # 启动文件（使用 D8C）
-├── TinyUSB/                    # TinyUSB 子模块 v0.21.0
-├── PCB/v0.1.0/                 # 硬件工程（EDA 源文件 / 原理图 PDF / Gerber）
-├── obj/                        # 编译产物（gitignore）
-├── README.md                   # 英文说明
-├── README.zh-CN.md             # 中文说明（本文件）
-└── LICENSE                     # GPL-3.0
+```text
+请求：'$' 'M' '<' <size:1> <cmd:1> <payload:size> <crc:1>
+应答：'$' 'M' '>' <size:1> <cmd:1> <payload:size> <crc:1>
+      crc = size、cmd 与全部 payload 字节的逐字节异或
 ```
 
-## 固件架构
++ `size` 最大 254，整帧最大 260 字节。
++ **错误应答同样使用 `>` 方向字节**，错误码放在 `payload[0]`。上位机解析必须看状态码，
+  不能只靠方向字节区分成功/失败（标准 MSP 的 `!` 在本实现中未使用）。
++ 半包保护：状态机非空闲时若 50 ms 内没有新字节，自动丢弃半包回到空闲态，
+  因此断线/网页刷新不会让后续命令被"吃掉"。
 
-```
-App/main.c ── 主循环（tud_task() 常驻轮询）
-│
-├─ HID 模式（松着上电）
-│    gamepad_process()
-│      ├─ input_read_buttons()   按键扫描（GPIO）
-│      ├─ joystick_process()     ADC → 取反 → 死区 → 满量程映射
-│      └─ ds4_process()          组装 64 字节报告
-│    → TinyUSB HID 中断端点（bInterval=1 → 125 µs）
-│
-└─ CDC 模式（按住 Share 上电）
-     cdc_process()
-       └─ msp_handler()          MSP v1 命令解析
-            ├─ CONFIG_GET/SET/SAVE/RESET  → Config
-            ├─ CALIB_START/SAMPLE/TRACK/END → joystick
-            ├─ JOYSTICK_RAW            → joystick 原始值
-            └─ REBOOT                  → 软复位
-     → TinyUSB CDC → 浏览器 Web Serial
-
-Config ── 三个配置组 + TLV 序列化 + CRC16 + 双扇区交替（0x08046000 / 0x08047000）
-```
-
-**上电顺序**：`board_init()` → `config_init()`（读 Flash、校验，失败回退默认值）→ `us_timer_init()` → `usb_desc_init()`（读 PB12 决定模式）→ `tud_init()` → `gamepad_init()`。
-
-**定速上报**：主循环用 TIM2 微秒计时，`micros() - last >= 配置间隔` 时才跑一帧 `gamepad_process()` + `ds4_process()`。间隔由配置组 `polling_rate` 查表得出（8k → 125 µs）。
-
-**双模式互斥**：CDC 模式下不跑 `gamepad_process()`，手柄数据完全不上报——这是 USB 设备每次只枚举一种配置的结果，不是缺陷。
-
-## 网页配置器
-
-[P1nkDog/ds4-gamepad-configurator](https://github.com/P1nkDog/ds4-gamepad-configurator) —— 纯前端页面，两条独立通道：
-
-| 用途 | 通道 | 设备状态 |
+| 命令码 | 名称 | 载荷 → 应答 |
 |---|---|---|
-| 改参数、校准摇杆 | Web Serial（CDC） | 固件正常运行，CDC 模式 |
-| 刷固件 | WebUSB（WCH ISP，`4348:55E0`） | 固件未运行，芯片在 Bootloader |
+| `0x01` | MSP_API_VERSION | — → `[major, minor]` = `[0, 1]` |
+| `0x02` | MSP_FC_VARIANT | — → ASCII `"P1NKD-DS4"` |
+| `0x03` | MSP_FC_VERSION | — → `[0, 1, 0]` |
+| `0x04` | MSP_REBOOT | `['R']` → `[status]`，随后设备复位 |
+| `0x10` | MSP_CONFIG_GET | `[id]` → `[id, version, data…]` |
+| `0x11` | MSP_CONFIG_SET | `[id, data…]` → `[id, status]`（只写 RAM，未落盘） |
+| `0x12` | MSP_CONFIG_SAVE | — → `[status]`（把所有脏组写入 Flash） |
+| `0x13` | MSP_CONFIG_RESET | `[id]` → `[id, status]`（单组恢复默认，只改 RAM） |
+| `0x14` | MSP_CONFIG_STATUS | — → `[count][id, size_lo, size_hi] × count` |
+| `0x15` | MSP_JOYSTICK_RAW | — → `[4][原始 LX,LY,RX,RY][映射后 LX,LY,RX,RY]`，均为 u16 LE |
+| `0x16` | MSP_CALIB_START | — → `[status]` |
+| `0x17` | MSP_CALIB_SAMPLE | — → `[4][center LX,LY,RX,RY]`，u16 LE |
+| `0x18` | MSP_CALIB_TRACK | — → `[status]` |
+| `0x19` | MSP_CALIB_END | — → `[status][4][min,center,max ×4]` |
+| `0x1A` | MSP_CALIB_CANCEL | — → `[status]` |
 
-配置流程：按住 **Share** 插线（或按 **RST**）进 CDC 模式 → 浏览器打开页面 → 点 **[连接]** → 改参数 → 底边栏 **[保存]**（改回报率还要 **[重启设备]**）。
+状态码：`0` 成功 · `1` 通用错误 · `2` 无效 ID · `3` 数据非法 · `4` Flash 写失败。
 
-## 配置说明
+### 4.3 配置组
 
-### 配置组
+| ID | 配置组 | 大小 | 字段 | 合法性约束 |
+|---|---|---|---|---|
+| 1 | `joystick_calib` | 24 B | 4 组（`min`, `center`, `max`）u16 | 每轴 `min < center < max ≤ 4095` |
+| 2 | `gamepad_settings` | 2 B | `deadzone`（百分比） | `0 ~ 50` |
+| 3 | `polling_rate` | 1 B | `level` | `0 ~ 5`（250 / 500 / 1k / 2k / 4k / 8k Hz） |
 
-| ID | 名称 | 结构 | 版本 | 默认值 | 说明 |
-|---|---|---|---|---|---|
-| 1 | `joystick_calib` | `JoystickCalibConfig` | 1 | 四轴 `min=0 / center=2048 / max=4095` | 每轴独立校准 |
-| 2 | `gamepad_settings` | `GamepadSettings` | 1 | `deadzone = 1`（%） | 死区为**全手柄共用**一个值 |
-| 3 | `polling_rate` | `PollingRateConfig` | 1 | `POLL_RATE_1000` | 六档：250 / 500 / 1k / 2k / 4k / 8k |
+非法值在**写入 RAM 之前**就被拒绝（返回 `MSP_STATUS_INVALID_DATA`）；保存时只要有任何
+一组当前非法，整次保存直接拒绝——不会出现"合法 CRC 包裹非法数据"的情况。
 
-存储格式是 TLV：文件头（magic `0xCF07` + version + count）→ 若干记录（type / length / version / flags / data）→ 结束符。读取时版本不匹配的记录会被忽略并回退默认值，所以改结构体要同步升版本号。
+### 4.4 摇杆校准流程
 
-### 摇杆处理
+五步，全部由网页驱动：
 
-1. **ADC 采样** → 原始 12 位值
-2. **硬件取反**（部分电位器方向相反，统一在这里翻正）
-3. **死区**：以 `center` 为基准，死区以内直接输出中点 `2048`
-4. **死区外满量程映射**：把 `[center ± dz, min/max]` 线性拉伸到 `[0, 2048]` / `[2048, 4095]`，推到极限就是满值
-5. **校准四步**（对应 `CALIB_START / SAMPLE / TRACK / END`）：采中心（16 次平均）→ 跟踪各轴极值 → 写回配置并保存
+1. `CALIB_START` —— 快照当前校准值（回滚点），状态 → `START`。
+2. **摇杆回中**，然后 `CALIB_SAMPLE` —— 每轴平均 16 帧，状态 → `CENTER_SAMPLED`。
+   该状态下轴输出强制为中点，避免"中心已更新、min/max 还是旧值"时预览出现半量程跳变。
+3. `CALIB_TRACK` —— 状态 → `TRACKING`，固件只在 RAM 里累计各轴极值
+   （活动配置在校准全程仍保持上一次的合法校准，不会把半成品写进 Flash）。
+4. **把两个摇杆推到各个方向极限**，然后 `CALIB_END` —— 校验 `min < center < max`、
+   每侧行程至少 200 个 ADC count，再过一遍配置层校验回调，全部通过才置脏并落盘；
+   任何一项不过就回滚到快照并返回错误。
+5. `CALIB_CANCEL` —— 任意时刻放弃校准并回滚，状态 → `IDLE`。
 
-### TinyUSB 配置
+越阶调用（例如没采样中心就直接跟踪）会被明确拒绝并回 `ERROR`，网页能区分"真的执行了"
+和"被状态机忽略"。
 
-`App/tusb_config.h` 里几个关键项：
+### 4.5 回报率——改完必须重启
 
-| 宏 | 值 | 作用 |
-|---|---|---|
-| `CFG_TUD_HID` / `CFG_TUD_CDC` | 1 / 1 | 同时编译两个设备类，运行时按模式选配置 |
-| `CFG_TUD_ENDPOINT0_SIZE` | 64 | 控制端点 |
-| `CFG_TUD_HID_EP_BUFSIZE` | 64 | 与 DS4 报告长度一致 |
-| `CFG_TUD_CDC_*_BUFSIZE` | 高速 512 / 全速 64 | 串口收发缓冲 |
-| `CFG_TUSB_OS` | `OPT_OS_NONE` | 裸机（无 RTOS），`tud_task()` 在主循环里轮询 |
+回报率是写进配置描述符的 HID **`bInterval`** 字段的（`bInterval = 6 - 档位`：
+250 Hz → 6，8 kHz → 1）。描述符只在枚举时被主机读取，所以：
 
-### 按键映射
+> **改完回报率必须点网页上的「重启设备」（或拔插一次）才会生效。**
 
-物理按键 → DS4 字段在 `Driver/gamepad/gamepad.c` 里硬编码：
+死区和校准则不同，改完立刻作用于下一帧报告。
 
-| 物理键 | DS4 字段 | 物理键 | DS4 字段 |
+关于真实 8 kHz 的几点提醒：
+
++ 主机必须支持 125 µs 的高速中断轮询（Linux `usbhid` 支持；Windows 取决于控制器驱动）。
++ 数据线与 HUB 必须是真高速（480 Mbps）。插在全速口上设备仍能用，但实际速率会退化到 1 ms。
++ 发送是令牌驱动的：上一帧传输完成才会组下一帧，所以实际速率**等于主机的轮询速率**，
+  不会出现突发连发。
+
+### 4.6 Flash 存储布局
+
+| 区域 | 地址 | 大小 | 内容 |
 |---|---|---|---|
-| □ / X（PB11） | `buttonWest` | L1（PE7） | `buttonL1` |
-| × / A（PE13） | `buttonSouth` | R1（PB10） | `buttonR1` |
-| ○ / B（PE14） | `buttonEast` | L2（PB0） | `buttonL2` |
-| △ / Y（PE15） | `buttonNorth` | R2（PB1） | `buttonR2` |
-| Share（PB12） | `buttonSelect` | L3（PA5） | `buttonL3` |
-| Options（PB14） | `buttonStart` | R3（PE1） | `buttonR3` |
-| PS（PE12） | `buttonHome` | 十字键 | `dpad`（支持八向） |
-| Touchpad（PB13） | `buttonTouchpad` | | |
+| 固件 | `0x08000000` – `0x0803DFFF` | ≤ 248 KB | 代码 + 只读数据；链接脚本里有一条 `ASSERT`，固件一旦长到触碰配置扇区就直接链接失败 |
+| 配置区 A（主） | `0x0803E000` | 4 KB | `ConfigHeader{magic 0xCF07, version 1, count}` + TLV 记录 + 尾标 + CRC16 |
+| 配置区 B（暂存） | `0x0803F000` | 4 KB | 同上布局，每次保存先写这里 |
 
-## 项目状态
+保存流程：在 RAM 里拼好镜像 → **与主扇区 A 逐字节比对，完全一致就跳过整次擦写**
+（保护 Flash 寿命）→ 擦 B、写 B、校验 B → 擦 A、写 A、校验 A。
+任一时刻两个扇区至少有一个是完整的 CRC 有效镜像，启动时优先读 A、失败回退 B。
+记录长度不足或内容过不了校验时跳过该组，保留出厂默认值。
 
-**已实现**
+---
 
-- DS4 HID 上报（64 字节：摇杆、按键、十字键、PS / Touchpad）
-- 8kHz 定速上报（USB 高速口）+ 六档可配
-- CDC 配置模式 + MSP v1（15 条命令）
-- 配置双扇区存储、CRC 校验、断电回退
-- 四轴校准与死区映射
-- 网页端改参数、校准、烧录
+## 5. DS4 报告布局（参考）
 
-**未实现 / 已知限制**
+输入报告 ID `0x01`，总长 64 字节（报告描述符声明 63 字节载荷 + 报告 ID）：
 
-- 拓展按键 BTN1~BTN8 只扫描、未上报（DS4 输入报告里没有对应字段）
-- 扳机是**数字**开关，没有模拟行程，因此没有扳机曲线
-- 按键映射硬编码，不支持宏、连发、重映射
-- 死区是全局单值，左右摇杆不能分别设
-- 配置模式与手柄模式互斥，切换要重新插线
-- 无陀螺仪 / 加速度计；Touchpad 只支持按下，无坐标
-
-## 参考资料
-
-| 来源 | 用途 |
+| 字节 | 内容 |
 |---|---|
-| [TinyUSB](https://github.com/hathach/tinyusb) | USB 协议栈（含 WCH CH32 USBHS 驱动） |
-| [wchisp-web](https://github.com/P1nkDog/wchisp-web) | 网页端 WCH ISP 烧录实现（属配置器仓库，非本固件） |
-| [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE) | 手柄功能与按键布局参考 |
-| [Betaflight](https://github.com/betaflight/betaflight) | 配置组 / MSP 协议设计参考 |
-| DualShock 4 报告描述符 | 以实机抓取的描述符为基准 |
+| 0 | 报告 ID `0x01` |
+| 1–4 | 左 X、左 Y、右 X、右 Y（0–255，中位 128） |
+| 5 | 低半字节 = 十字键（0=上，1=右上 … 7=左上，0x0F=松开）；高 4 位 = □ × ○ △ |
+| 6 | L1、R1、L2、R2、Share、Options、L3、R3 |
+| 7 | PS（bit0）、Touchpad（bit1）、6-bit 滚动帧计数器（bit2–7） |
+| 8–9 | 左/右扳机（本硬件只有 0x00 或 0xFF） |
+| 10–63 | 厂商自定义区：IMU / 触摸板 / 电量等。字节 30 固定填 `0x1B`（满电 + USB 供电） |
 
-## 许可证
+认证握手用的 Feature 报告：`0x02` 校准（36 B）、`0x03` 定义（47 B）、`0x12` MAC（15 B）、
+`0xA3` 版本/日期（48 B）、`0xF2` 签名状态（15 B）、`0xF3` 复位认证（7 B）。
+`0xF1`（签名 nonce）故意 STALL —— 本固件不做真认证。
 
-[GPL-3.0-only](./LICENSE)。可以自由使用、修改、分发，但衍生工程必须同样以 GPL-3.0 开源，且不提供担保。
+---
 
-## 致谢
+## 6. 目录结构
 
-- [TinyUSB](https://github.com/hathach/tinyusb) —— USB 协议栈，设备类、端点管理与 WCH 移植层都来自它
-- 沁恒微电子（WCH）—— [CH32V307 芯片、标准外设库与官方例程](https://www.wch.cn/products/CH32V307.html)
-- [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE)、[Betaflight](https://github.com/betaflight/betaflight) —— 按键布局与配置系统的思路来源
+```text
+App/          主循环、TinyUSB 配置（tusb_config.h）
+Bsp/          板级初始化、中断向量（USBHS/TIM2）、时钟树、Link.ld
+Config/       配置注册表、TLV + CRC16 存储、Flash HAL
+Driver/
+  ds4/        DS4 报文组装、报告描述符、Feature 报告
+  gamepad/    按键/十字键映射到 GamepadState
+  input/      GPIO 按键扫描（含消抖）+ ADC 摇杆采样
+  joystick/   校准状态机、死区与满量程映射
+  msp/        MSP v1 状态机 + 命令分发
+  cdc/        CDC 管道，把字节喂给 MSP 解析器
+  usb/        描述符路由（HID / CDC）、USB 设备栈初始化
+  timer/      TIM2 微秒时基（micros()）
+  stat/       可选的代码段耗时统计（默认编译为空）
+Core/         RISC-V 内核支持（PFIC/NVIC 封装、CSR 读写）
+Debug/        延时函数与 printf 重定向（USART2）
+Startup/      startup_ch32v30x_D8C.S（向量表、复位入口）
+Peripheral/   WCH CH32V30x 标准外设库
+TinyUSB/      TinyUSB 0.21（git 子模块）
+obj/          编译产物（已被 git 忽略）
+Docs/         历史设计文档归档（可能过时）
+PCB/          硬件版本（v0.1.0、v0.2.0）
+```
+
+---
+
+## 7. 开源致谢与许可
+
+本固件站在这些开源项目的肩膀上：
+
++ **[TinyUSB](https://github.com/hathach/tinyusb)** —— 作者 Ha Thach（hathach）及贡献者。
+  USB 设备栈、WCH CH32V307 高速口移植层、HID/CDC 类驱动全部来自 TinyUSB 0.21（MIT）。
++ **WCH / 南京沁恒微电子** —— CH32V30x 标准外设库、启动文件，以及 USBHS 时钟/PLL 上电序列，
+  取自 CH32V307 EVT 官方例程。
++ **[GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE)** —— DS4 报告描述符、
+  Feature 报告握手数据、"报告 ID 内嵌在载荷里发送"这一技巧的参考实现。
++ **DS4/PS4 协议研究社区** —— 输入报告布局与认证握手行为来自各家逆向分析文档。
++ **[betaflight](https://github.com/betaflight/betaflight)** —— 参数分组（TLV + 校验回调）
+  配置设计的灵感来源。
+
+本项目以 **MIT 许可证**发布，详见 [LICENSE](LICENSE)。
+`Peripheral/`、`Core/`、`Startup/`、`Debug/` 源自 WCH EVT 包，保留其原始版权声明。
