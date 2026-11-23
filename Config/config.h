@@ -64,13 +64,14 @@ typedef struct{
 } GamepadSettings;
 
 //--------------------------------------------------------------------+
-// 按键重映射：物理输入位（Driver/input/input.h 的 INPUT_MASK_*）→ DS4 逻辑功能
-//   map[] 的下标就是物理位号（0~25），值是该物理键要触发的 DS4 逻辑功能。
+// 按键重映射：物理输入位（Driver/input/input.h 的 INPUT_MASK_*）→ DS4 逻辑功能位掩码
+//   mask[] 的下标就是物理位号（0~25），值是该物理键要触发的**一组**逻辑功能位。
 //   位序必须与 input.h 严格对应：
 //     0=UP 1=RIGHT 2=DOWN 3=LEFT 4=X(□) 5=A(×) 6=B(○) 7=Y(△)
 //     8=L1 9=R1 10=L2 11=R2 12=L3 13=R3 14=PS 15=SELECT 16=START 17=TOUCHPAD
 //     18~25=BTN1~BTN8（扩展键）
-//   多对一允许（两个物理键映射到同一功能，按"或"叠加）；
+//   多对一允许（两个物理键映射到同一功能，按位或叠加）；
+//   一对多也允许（一个物理键置多位 → 同时触发多个 DS4 按键）；
 //   0 表示禁用该物理键。
 //--------------------------------------------------------------------+
 #define BUTTON_MAP_COUNT 26U
@@ -98,8 +99,16 @@ typedef enum {
     DS4_BTN_MAX      = 18
 } Ds4LogicalButton;
 
+//逻辑功能位掩码：位号就是 Ds4LogicalButton 的值（1~18）
+//  bit0（DS4_BTN_NONE）与 bit19~31 都是非法位：写入前由 validate_button_map() 拒绝，
+//  运行期再由 gamepad_build_logical_mask() 用 DS4_LOGICAL_MASK_ALL 掩一次兜底。
+#define DS4_BTN_BIT(btn)     (1UL << (uint32_t)(btn))
+#define DS4_LOGICAL_MASK_ALL 0x0007FFFEUL   // bit1 ~ bit18 合法
+
 typedef struct {
-    uint8_t map[BUTTON_MAP_COUNT]; // 索引 0~25 对应物理按键 bit0~25，值为 Ds4LogicalButton
+    // 索引 0~25 对应物理按键 bit0~25，值为逻辑功能位掩码：
+    //   0 = 禁用；单个位 = 触发一个功能；多个位 = 一个物理键同时触发多个功能（组合键）
+    uint32_t mask[BUTTON_MAP_COUNT];
 } ButtonMapConfig;
 
 //回报率设置

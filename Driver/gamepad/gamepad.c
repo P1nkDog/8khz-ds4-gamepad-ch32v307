@@ -16,11 +16,14 @@ static GamepadState state;
 
 //--------------------------------------------------------------------+
 // 第一阶段：物理输入位（input.h 的 INPUT_MASK_*）→ DS4 逻辑功能位掩码
-//   下标即物理位号 0~25，值取自 ButtonMapConfig.map[i]（Ds4LogicalButton）。
-//   - 0（DS4_BTN_NONE）表示该物理键被禁用，不产生任何逻辑位；
-//   - 多对一允许：两个物理键映射到同一功能时按位或叠加，互不覆盖；
-//   - 越界值（> DS4_BTN_MAX）在配置层已被 validate_button_map() 拒收，
-//     这里再挡一次，避免 (1UL << 32..) 触发未定义移位。
+//   下标即物理位号 0~25，值取自 ButtonMapConfig.mask[i]（逻辑功能位掩码）。
+//   - mask[i] == 0 表示该物理键被禁用，不产生任何逻辑位；
+//   - 一对多：mask[i] 置了多位时，按下这一个物理键会同时触发多个 DS4 按键
+//     （例如 L1|R1，或 A|X|UP）；
+//   - 多对一：两个物理键映射到同一功能时按位或叠加，互不覆盖；
+//   - 非法位（bit0 / bit19~31）在配置层已被 validate_button_map() 拒收，
+//     这里再用 DS4_LOGICAL_MASK_ALL 掩一次，防止 Flash 被外部工具写坏后
+//     触发 (1UL << 32..) 之类的未定义移位；
 //   - 上电进入 CDC 配置模式的按键判定在 Driver/usb/usb_descriptors.c 里
 //     直接读 PB12 物理电平，不经过本表，因此重映射无法屏蔽配置模式入口。
 //--------------------------------------------------------------------+
@@ -28,12 +31,9 @@ static uint32_t gamepad_build_logical_mask(uint32_t raw_buttons, const ButtonMap
     uint32_t logical = 0;
 
     for (uint8_t i = 0; i < BUTTON_MAP_COUNT; i++) {
-        if ((raw_buttons & (1UL << i)) == 0U) continue;
-
-        const uint8_t target = cfg->map[i];
-        if (target == (uint8_t)DS4_BTN_NONE || target > (uint8_t)DS4_BTN_MAX) continue;
-
-        logical |= (1UL << target);
+        if ((raw_buttons & (1UL << i)) != 0U) {
+            logical |= (cfg->mask[i] & DS4_LOGICAL_MASK_ALL);
+        }
     }
 
     return logical;
