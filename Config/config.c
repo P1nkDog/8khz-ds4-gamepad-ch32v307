@@ -267,15 +267,31 @@ const ConfigDesc* config_get_desc_by_index(uint8_t index){
 //--------------------------------------------------------------------+
 
 //验证一个扇区的数据是否有效
+//  旧实现把整扇区读进全局 sector_buf 再算 CRC，等于"用待写入的数据源当作校验读回
+//  缓冲"——正确性完全依赖调用顺序（config_save 里必须"先写后验"），任何人调整顺序
+//  都会静默写坏数据。现在改成：头部/尾部各读一个小块，中间按 64B 分块流式累加 CRC，
+//  校验过程不碰任何共享缓冲区。
 static bool validate_sector(uint32_t addr){
-    config_hal_read(addr, sector_buf, sizeof(sector_buf));
+    ConfigHeader h;
+    config_hal_read(addr, (uint8_t *)&h, sizeof(h));
+    if (h.magic != CONFIG_MAGIC) return false;
 
-    ConfigHeader *h = (ConfigHeader *)sector_buf;
-    if (h->magic != CONFIG_MAGIC) return false;
+    uint8_t tail[2];
+    config_hal_read(addr + CONFIG_FLASH_SECTOR_SIZE - 2, tail, sizeof(tail));
+    uint16_t stored = (uint16_t)(tail[0] | ((uint16_t)tail[1] << 8));
 
-    uint16_t stored = sector_buf[CONFIG_FLASH_SECTOR_SIZE - 2] | (sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] <<8);
-    uint16_t calc = crc16_update(0xFFFF, sector_buf, CONFIG_FLASH_SECTOR_SIZE - 2);
-    return (stored == calc);
+    uint16_t crc = 0xFFFFu;
+    uint8_t chunk[64];
+    const uint32_t total = CONFIG_FLASH_SECTOR_SIZE - 2u;
+
+    for (uint32_t off = 0; off < total; off += sizeof(chunk)) {
+        uint32_t n = total - off;
+        if (n > sizeof(chunk)) n = sizeof(chunk);
+        config_hal_read(addr + off, chunk, n);
+        crc = crc16_update(crc, chunk, n);
+    }
+
+    return (stored == crc);
 }
 
 //从指定扇区加载数据
@@ -284,6 +300,10 @@ static void load_sector(uint32_t addr){
 
     ConfigHeader *h = (ConfigHeader *)sector_buf;
     if (h->magic != CONFIG_MAGIC) return;
+
+    //格式版本不匹配直接放弃：宁可让 RAM 保留出厂默认值，也不要把旧布局的字节
+    //按新结构体解释（那会产出"结构正确、语义荒谬"的配置，比恢复默认更难排查）。
+    if (h->version != CONFIG_HEADER_VERSION) return;
 
     //遍历所有tlv数据
     uint32_t offset = sizeof(ConfigHeader);
@@ -340,7 +360,7 @@ bool config_save(void){
     //写header
     ConfigHeader header = {
         .magic = CONFIG_MAGIC,
-        .version = 1,
+        .version = CONFIG_HEADER_VERSION,
         .count = registry.count,
     };
     memcpy(sector_buf + offset, &header, sizeof(header));
@@ -391,8 +411,34 @@ bool config_save(void){
 
     //写crc
     uint16_t crc = crc16_update(0xFFFF, sector_buf, CONFIG_FLASH_SECTOR_SIZE - 2);
-    sector_buf[CONFIG_FLASH_SECTOR_SIZE - 2] = crc & 0xFF;
-    sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] = crc >> 8;
+    sector_buf[CONFIG_FLASH_SECTOR_SIZE - 2] = (uint8_t)(crc & 0xFF);
+    sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] = (uint8_t)(crc >> 8);
+
+    //--------------------------------------------------------------------+
+    // 无实质变化则跳过擦写
+    //  Flash 擦写寿命量级 1 万次，而"保存"是上位机的高频动作（拖一次滑块就可能
+    //  触发一次 CONFIG_SAVE）。先与主扇区 A 逐字节比对：完全一致就说明这次保存
+    //  没有任何内容变化，直接清脏标记返回成功，把寿命留给真正需要落盘的修改。
+    //--------------------------------------------------------------------+
+    {
+        uint8_t chunk[64];
+        bool identical = true;
+
+        for (uint32_t off = 0; off < sizeof(sector_buf); off += sizeof(chunk)) {
+            config_hal_read(CONFIG_FLASH_SECTOR_A_ADDR + off, chunk, sizeof(chunk));
+            if (memcmp(chunk, sector_buf + off, sizeof(chunk)) != 0) {
+                identical = false;
+                break;
+            }
+        }
+
+        if (identical) {
+            for (int i = 0; i < registry.count; i++) {
+                registry.dirty[i] = false;
+            }
+            return true;
+        }
+    }
 
     //【改动】先写暂存扇区 B，校验通过后再覆盖主扇区 A
     //

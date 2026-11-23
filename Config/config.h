@@ -95,6 +95,11 @@ typedef struct{
 
 #define CONFIG_MAGIC 0xCF07
 
+//存储格式版本号（写入 ConfigHeader.version，加载时校验）
+//  只有 TLV 布局/字段语义发生不兼容变化时才递增；递增后旧扇区会被整体拒绝，
+//  RAM 回落到出厂默认值（属于"宁可重置也不误读"的取舍）。
+#define CONFIG_HEADER_VERSION 1
+
 //文件头
 typedef struct{
     uint16_t magic;
