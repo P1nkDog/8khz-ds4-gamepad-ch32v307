@@ -37,9 +37,24 @@ typedef struct{
 //  该值同时被 joystick_map_axis() 在运行时钳位、被 validate_gamepad_settings() 在写入前拒绝。
 #define CONFIG_DEADZONE_MAX 2047U
 
+//--------------------------------------------------------------------+
+// 轴向软件反转位掩码（作用于"死区满量程映射之后"的最终输出）
+//   与轴编号枚举（0=LX 1=LY 2=RX 3=RY，见 Driver/joystick/joystick.c）按位一一对应，
+//   因此 joystick_process() 可以直接用 (1U << axis) 取位。
+//   只翻最终结果、不动 raw 与标定坐标系：切换反转无需重新校准摇杆，
+//   且中点（JOYSTICK_OUTPUT_MID=2048）反转后严格保持 2048。
+//--------------------------------------------------------------------+
+#define JOYSTICK_INVERT_LX       (1U << 0)   // 左摇杆 X
+#define JOYSTICK_INVERT_LY       (1U << 1)   // 左摇杆 Y
+#define JOYSTICK_INVERT_RX       (1U << 2)   // 右摇杆 X
+#define JOYSTICK_INVERT_RY       (1U << 3)   // 右摇杆 Y
+#define JOYSTICK_INVERT_MASK_ALL 0x0FU       // 合法位全集（bit4~7 必须为 0）
+
 typedef struct{
     uint16_t deadzone_left;   // 左摇杆死区 (0 ~ 2047, 12-bit ADC count)
     uint16_t deadzone_right;  // 右摇杆死区 (0 ~ 2047, 12-bit ADC count)
+    uint8_t  invert_mask;     // 轴向反转位掩码: bit0=LX, bit1=LY, bit2=RX, bit3=RY
+    uint8_t  _reserved;       // 预留对齐字节，强制保持为 0
 } GamepadSettings;
 
 //回报率设置

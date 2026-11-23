@@ -97,7 +97,9 @@ static uint16_t joystick_read_axis(uint8_t axis, const JoystickData *raw){
 }
 
 //单轴死区外满量程映射（12-bit 计数死区：deadzone_counts 即死区半径，单位 ADC count）
-static uint16_t joystick_map_axis(uint16_t raw, const JoystickCalibration *calib, uint16_t deadzone_counts){
+//  invert = 后置软件反转：只翻最终映射结果，不参与 raw/标定的坐标系，
+//  因此切换反转不会影响已标定的 min/center/max，也无需重新校准。
+static uint16_t joystick_map_axis(uint16_t raw, const JoystickCalibration *calib, uint16_t deadzone_counts, bool invert){
     if(deadzone_counts > JOYSTICK_DEADZONE_MAX) deadzone_counts = JOYSTICK_DEADZONE_MAX;
 
     int32_t center = calib->center;
@@ -109,37 +111,47 @@ static uint16_t joystick_map_axis(uint16_t raw, const JoystickCalibration *calib
     int32_t dz_neg = (int32_t)deadzone_counts;
     int32_t dz_pos = (int32_t)deadzone_counts;
 
+    //先算出"未反转"的最终映射结果，再统一做后置反转，保证只有一条返回路径
+    uint16_t out;
+
     //以下边界比较全部走 int32_t 有符号运算：
     //  deadzone_counts 可大于 center（例如 center=1200、死区=2047），若沿用
     //  (uint16_t)(center - dz_neg) 强转，负数会被解释成 64xxx 的大正数，
     //  死区窗口整体翻转，映射结果反向。
-    //死区内
     if ((int32_t)raw >= (center - dz_neg) && (int32_t)raw <= (center + dz_pos)) {
-        return JOYSTICK_OUTPUT_MID;
-    }
-
-    //死区外负方向
-    if ((int32_t)raw < (center - dz_neg)) {
+        //死区内：静止零漂恒为正中
+        out = JOYSTICK_OUTPUT_MID;
+    } else if ((int32_t)raw < (center - dz_neg)) {
+        //死区外负方向
         int32_t denom = half_neg - dz_neg;
-        if(denom <= 0) return JOYSTICK_OUTPUT_MID;
-        int32_t out = ((int32_t)raw - min) * JOYSTICK_OUTPUT_MID / denom;
-        if(out > JOYSTICK_OUTPUT_MID -1) out = JOYSTICK_OUTPUT_MID -1;
-        if(out < 0) out = 0;
-        return (uint16_t)out;
-    }
-
-    //死区外正方向
-    if ((int32_t)raw > (center + dz_pos)) 
-    {
+        if(denom <= 0){
+            out = JOYSTICK_OUTPUT_MID;
+        } else {
+            int32_t v = ((int32_t)raw - min) * JOYSTICK_OUTPUT_MID / denom;
+            if(v > JOYSTICK_OUTPUT_MID -1) v = JOYSTICK_OUTPUT_MID -1;
+            if(v < 0) v = 0;
+            out = (uint16_t)v;
+        }
+    } else {
+        //死区外正方向
         int32_t denom = half_pos - dz_pos;
-        if(denom <= 0) return JOYSTICK_OUTPUT_MID;
-        int32_t t = ((int32_t)raw - center - dz_pos) * (JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID) / denom;
-        if(t < 0) t = 0;
-        if(t > JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID) t = JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID;
-        return (uint16_t)(JOYSTICK_OUTPUT_MID + t);
+        if(denom <= 0){
+            out = JOYSTICK_OUTPUT_MID;
+        } else {
+            int32_t t = ((int32_t)raw - center - dz_pos) * (JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID) / denom;
+            if(t < 0) t = 0;
+            if(t > JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID) t = JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID;
+            out = (uint16_t)(JOYSTICK_OUTPUT_MID + t);
+        }
     }
 
-    return JOYSTICK_OUTPUT_MID;
+    //后置反转：中点(2048)保持不动，确保死区内静止零漂严格居中；
+    //  其余有效位移对称翻转（4095 <-> 0、2048 <-> 2047）。
+    if (invert && out != JOYSTICK_OUTPUT_MID) {
+        out = (uint16_t)(JOYSTICK_OUTPUT_MAX - out);
+    }
+
+    return out;
 }
 
 //--------------------------------------------------------------------+
@@ -335,7 +347,9 @@ void joystick_process(void){
             //左摇杆（LX/LY）用 deadzone_left，右摇杆（RX/RY）用 deadzone_right
             uint16_t dz = (a == AXIS_LX || a == AXIS_LY) ? settings->deadzone_left
                                                          : settings->deadzone_right;
-            out = joystick_map_axis(v, &calib->calib[a], dz);
+            //轴向反转位：轴编号枚举 0=LX 1=LY 2=RX 3=RY 与掩码位序一一对应
+            bool invert = (settings->invert_mask & (uint8_t)(1U << a)) != 0U;
+            out = joystick_map_axis(v, &calib->calib[a], dz, invert);
         }
         switch (a) {
             case AXIS_LX: joy_out.lx = out; break;

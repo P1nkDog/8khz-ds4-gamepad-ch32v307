@@ -28,6 +28,12 @@ _Static_assert((CONFIG_FLASH_SECTOR_A_ADDR % CONFIG_FLASH_SECTOR_SIZE) == 0,
 _Static_assert((CONFIG_FLASH_SECTOR_B_ADDR % CONFIG_FLASH_SECTOR_SIZE) == 0,
                "配置扇区 B 未按 4KB 扇区对齐");
 
+//结构体布局固化：2 + 2 + 1 + 1 = 6 字节，且不允许编译器插入隐式填充。
+//  该结构体会被整体 memcpy 进 Flash 并与扇区逐字节比对，长度/填充一旦漂移，
+//  既会让旧记录被误读，也会让"内容未变"的保存失去跳过擦写的依据。
+_Static_assert(sizeof(GamepadSettings) == 6,
+               "GamepadSettings 布局漂移（应为 6 字节：deadzone_left/right + invert_mask + _reserved）");
+
 
 //--------------------------------------------------------------------+
 // 配置组实例
@@ -60,6 +66,8 @@ static const JoystickCalibConfig joystickCalibDefault = {
 static const GamepadSettings gamepadSettingsDefault = {
     .deadzone_left  = 40,
     .deadzone_right = 40,
+    .invert_mask    = 0,
+    ._reserved      = 0,
 };
 
 static const PollingRateConfig pollingRateDefault = {
@@ -115,7 +123,9 @@ static bool validate_joystick_calib(const void *data){
     return true;
 }
 
-//手柄设置：左右摇杆死区计数均不得超过 CONFIG_DEADZONE_MAX
+//手柄设置：左右死区计数不得超限、反转掩码不得含非法位、预留字节必须为 0
+//  预留字节也参与校验：结构体整体（6 字节）会被 memcpy 进 Flash 并与扇区逐字节比对，
+//  若允许残留非 0 垃圾，两次"内容相同"的保存也会被判为有变化，白白擦写一次扇区。
 static bool validate_gamepad_settings(const void *data){
     if (data == NULL) return false;
 
@@ -123,7 +133,9 @@ static bool validate_gamepad_settings(const void *data){
     memcpy(&s, data, sizeof(s));
 
     return (s.deadzone_left  <= CONFIG_DEADZONE_MAX) &&
-           (s.deadzone_right <= CONFIG_DEADZONE_MAX);
+           (s.deadzone_right <= CONFIG_DEADZONE_MAX) &&
+           ((s.invert_mask & ~JOYSTICK_INVERT_MASK_ALL) == 0U) &&
+           (s._reserved == 0U);
 }
 
 //回报率：档位必须落在枚举尾部之内，否则 bInterval 计算会越界
@@ -504,10 +516,10 @@ void config_init(void){
     config_register(CONFIG_ID_JOYSTICK_CALIB, 1, sizeof(JoystickCalibConfig), 
                     &g_joystickCalib, &joystickCalibDefault, "joystick_calib",
                     validate_joystick_calib);
-    // 组版本递增到 2：死区字段由"单字段百分比"改为"左右独立 12-bit 计数"，
-    // 旧 Flash 里 version=1 的记录会在 load_sector() 的 rec->version == d->version
+    // 组版本递增到 3：结构体从 4 字节（左/右死区）扩到 6 字节（追加反转掩码 + 预留字节），
+    // 旧 Flash 里 version<=2 的记录会在 load_sector() 的 rec->version == d->version
     // 判断处被整条跳过，RAM 回落到新的出厂默认值（宁可重置也不误读）。
-    config_register(CONFIG_ID_GAMEPAD_SETTINGS, 2, sizeof(GamepadSettings), 
+    config_register(CONFIG_ID_GAMEPAD_SETTINGS, 3, sizeof(GamepadSettings), 
                     &g_gamepadSettings, &gamepadSettingsDefault, "gamepad_settings",
                     validate_gamepad_settings);
     config_register(CONFIG_ID_POLLING_RATE, 1, sizeof(PollingRateConfig),
