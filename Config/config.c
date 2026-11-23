@@ -356,8 +356,12 @@ bool config_save(void){
             .flags = 0,
         };
 
-        //空间检查
-        if (offset + rec.length > CONFIG_FLASH_SECTOR_SIZE - 4) break;
+        //空间检查：放不下就整体失败返回，绝不静默 break。
+        //  静默截断会让 Flash 里的配置比 RAM 少几组，而调用方仍以为保存成功。
+        //  -4 是给 footer(2B) 和末尾 CRC(2B) 预留的空间。
+        if (offset + rec.length > CONFIG_FLASH_SECTOR_SIZE - 4) {
+            return false;
+        }
 
         memcpy(sector_buf + offset, &rec, sizeof(rec));
         offset += sizeof(rec);
@@ -365,7 +369,10 @@ bool config_save(void){
         offset += d->size;
     }
     
-    //写footer
+    //写footer（同样要确认放得下，末 2 字节留给 CRC）
+    if (offset + sizeof(ConfigFooter) > CONFIG_FLASH_SECTOR_SIZE - 2) {
+        return false;
+    }
     ConfigFooter footer = {.terminator = 0};
     memcpy(sector_buf + offset, &footer, sizeof(footer));
     offset += sizeof(footer);
@@ -376,33 +383,29 @@ bool config_save(void){
     sector_buf[CONFIG_FLASH_SECTOR_SIZE - 1] = crc >> 8;
 
     //【改动】先写暂存扇区 B，校验通过后再覆盖主扇区 A
+    //
+    //  关中断已下沉到 config_hal 层：擦除是一次硬件操作的原子窗口，写入按
+    //  256B 硬件页逐页保护、页与页之间放开中断。业务层不再跨"擦除+整扇区
+    //  写入"长时间屏蔽全局中断（旧实现单段屏蔽约 20~30ms）。
 
     //第1步：写 B（暂存）
-    __disable_irq();
     if(!config_hal_erase_sector(CONFIG_FLASH_SECTOR_B_ADDR)){
-        __enable_irq();
         return false;
     }
     if(!config_hal_write(CONFIG_FLASH_SECTOR_B_ADDR, sector_buf, sizeof(sector_buf))){
-        __enable_irq();
         return false;
     }
-    __enable_irq();
     if (!validate_sector(CONFIG_FLASH_SECTOR_B_ADDR)) {
         return false;
     }
 
     //第2步：用同一份 buffer 覆盖 A（提交，A 永远是主读扇区）
-    __disable_irq();
     if(!config_hal_erase_sector(CONFIG_FLASH_SECTOR_A_ADDR)){
-        __enable_irq();
         return false;
     }
     if(!config_hal_write(CONFIG_FLASH_SECTOR_A_ADDR, sector_buf, sizeof(sector_buf))){
-        __enable_irq();
         return false;
     }
-    __enable_irq();
     if (!validate_sector(CONFIG_FLASH_SECTOR_A_ADDR)) {
         return false;
     }
