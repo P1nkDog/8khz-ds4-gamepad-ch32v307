@@ -51,8 +51,12 @@ void msp_init(void) {
 //--------------------------------------------------------------------+
 
 //发送成功响应：$ M > [size] [cmd] [data...] [crc]
+//  位置计数器必须是 uint16_t：整帧长度是 len + 6，而 len 最大可达 MSP_PAYLOAD_MAX
+//  （254），合计 260 字节 —— 用 uint8_t 会在 len >= 250 时回绕，把 5 字节帧头
+//  （$ M > size cmd）踩掉并只发出 4 字节残缺帧。msp_tx_buf 正好是 260 字节，
+//  与 len 上限严格匹配。
 static void msp_send_reply(uint8_t cmd, const uint8_t *data, uint8_t len) {
-    uint8_t pos = 0;
+    uint16_t pos = 0;
     uint8_t crc = 0;
 
     // 帧头
@@ -390,6 +394,14 @@ void msp_process_byte(uint8_t byte) {
             break;
 
         case MSP_STATE_SIZE:
+            //载荷长度超限直接丢帧：msp_rx_buf 只能容纳 MSP_PAYLOAD_MAX(254) 字节，
+            //  若放行 size > 254，末尾字节会"计入 CRC 但不写入缓冲"，而分发时仍以
+            //  size 作为 len 传下去，导致 handler 读到上一帧的残留字节。
+            //  在入口就把整帧丢弃，状态机回到 IDLE 等下一个 '$'。
+            if (byte > MSP_PAYLOAD_MAX) {
+                msp_state = MSP_STATE_IDLE;
+                break;
+            }
             msp_rx_size = byte;
             msp_rx_crc = msp_crc_update(msp_rx_crc, byte);
             msp_rx_offset = 0;

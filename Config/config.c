@@ -349,6 +349,18 @@ bool config_save(void){
     //写每个配置组的record
     for (int i = 0; i < registry.count; i++) {
         ConfigDesc *d = &registry.descs[i];
+
+        //落盘前的最后一道防线：任何组只要当前 RAM 内容不合法，整次保存直接失败。
+        //  存在的风险路径：某组正处于"改了一半"的中间态，而 config_save() 是遍历
+        //  写全部组，只要别的组变脏就会把它一并串行化。没有这道守卫，非法内容会
+        //  带着合法 CRC 进入 Flash；下次启动虽然会被 load_sector() 的校验挡下来，
+        //  但代价是该组被重置为出厂默认值（用户数据丢失，且现场表现为"莫名恢复默认"）。
+        //  改为"拒绝保存"后：RAM 与 Flash 都保持原样，上位机收到
+        //  MSP_STATUS_FLASH_ERROR，用户可先恢复合法状态再重发 CONFIG_SAVE。
+        if (d->validate != NULL && !d->validate(d->ram)) {
+            return false;
+        }
+
         ConfigRecord rec = {
             .type = d->id,
             .length = sizeof(ConfigRecord) + d->size,

@@ -19,6 +19,14 @@
 #define JOYSTICK_OUTPUT_MAX 4095
 #define DEADZONE_PERCENT_MAX 50
 
+//死区上限必须与 Config/config.h 的 CONFIG_DEADZONE_MAX 严格一致：
+//  DEADZONE_PERCENT_MAX 是 joystick_map_axis() 的运行时钳位上限，
+//  CONFIG_DEADZONE_MAX  是 config_validate() 的写入前拒绝上限。
+//  两个宏一旦分叉，就会出现"校验放行的值被静默钳位"（用户设 60%，实际只生效 50%），
+//  或者反向"合法值被拒收"，都属于难以排查的隐性不一致，所以在编译期直接绑定。
+_Static_assert(CONFIG_DEADZONE_MAX == DEADZONE_PERCENT_MAX,
+               "deadzone upper bound mismatch between config.h and joystick.c");
+
 //轴编号
 enum{
     AXIS_LX = 0,
@@ -179,17 +187,27 @@ void joystick_calib_sample_center(void){
 void joystick_calib_track_start(void){
     if (calib_state != CALIB_CENTER_SAMPLED) return;
 
-    JoystickCalibConfig *calib = (JoystickCalibConfig *)config_get_mutable(CONFIG_ID_JOYSTICK_CALIB);
+    const JoystickCalibConfig *calib =
+        (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
     if (calib == NULL) return;
 
     for (uint8_t a = 0; a < 4; a++) {
         uint16_t c = calib->calib[a].center;
         track_min[a] = c;
         track_max[a] = c;
-        //跟踪期间把 min/max 收回 center：摇杆输出恒定中点，既不会把还没标定的
-        //行程放大成满量程，也避免 center/min/max 三者关系暂时失效导致映射异常。
-        calib->calib[a].min = c;
-        calib->calib[a].max = c;
+        //刻意不改写活动配置的 min/max（只读 center 做跟踪基准）。
+        //
+        //  旧实现把 min/max 临时收回 center，会让 g_joystickCalib 出现
+        //  "min == center == max" 的非法中间态。而 config_save() 是遍历写全部配置组，
+        //  只要此刻别的组（死区/回报率）变脏，一次保存就会把这个中间态连同
+        //  合法 CRC 一起写进 A/B 两个扇区；下次启动 load_sector() 用
+        //  validate_joystick_calib() 判定该记录非法而整条丢弃，用户既有校准被静默
+        //  重置为出厂值（数据丢失）。
+        //
+        //  现在活动配置在校准全程都保持"上一次合法校准"，半成品只存在于
+        //  track_min/track_max 这两个纯 RAM 变量里。"跟踪期间不把未标定行程
+        //  放大成满量程"这个原始目的，改由 joystick_process() 在 CALIB_TRACKING
+        //  下直接输出中点来达成（见该函数）。
     }
     calib_state = CALIB_TRACKING;
 }
@@ -288,7 +306,15 @@ void joystick_process(void){
         joystick_calib_update(a, v);
 
         //死区外满量程映射
-        uint16_t out = joystick_map_axis(v, &calib->calib[a], settings->deadzone);
+        //  跟踪期间不映射，直接输出中点：此时 min/max 尚未标定完，做映射会把
+        //  "只推了一半"当成满量程输出；同时活动配置全程保持上一次的合法校准，
+        //  不再出现 min==center==max 的非法中间态（见 joystick_calib_track_start）。
+        uint16_t out;
+        if (calib_state == CALIB_TRACKING) {
+            out = JOYSTICK_OUTPUT_MID;
+        } else {
+            out = joystick_map_axis(v, &calib->calib[a], settings->deadzone);
+        }
         switch (a) {
             case AXIS_LX: joy_out.lx = out; break;
             case AXIS_LY: joy_out.ly = out; break;

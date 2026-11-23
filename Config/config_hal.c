@@ -15,13 +15,48 @@
 #define CONFIG_FLASH_PAGE_SIZE 256U
 
 
+//--------------------------------------------------------------------+
+// 临界区原语：保存并恢复 mstatus.MIE
+//   __disable_irq() / __enable_irq() 在 core_riscv.h 里是无条件写 mstatus
+//   （csrc / csrs 0x800, 0x88），只要在"本来就已经关中断"的上下文（ISR 内部、
+//   或外层临界区）里调用，返回时就会把中断提前打开，破坏外层临界区语义。
+//   这里改成：先读出旧 MIE 并原子地清掉、事情办完再按旧值恢复，天然支持嵌套。
+//     csrrci rd, 0x800, 0x8 —— 一条指令内完成"读 mstatus 到 rd + 清 MIE(bit3)"，
+//     读出的是"关中断之前"的原始值，因此可据此判断调用者原本是否允许中断。
+//--------------------------------------------------------------------+
+#if defined(__riscv)
+static inline uint32_t flash_irq_save(void)
+{
+    uint32_t mstatus;
+    __asm volatile ("csrrci %0, 0x800, 0x8" : "=r" (mstatus) : : "memory");
+    __asm volatile ("fence.i");
+    return mstatus;
+}
+
+static inline void flash_irq_restore(uint32_t mstatus)
+{
+    //只有调用者原本是开中断状态才恢复成开中断；原本就关着就保持关着。
+    if ((mstatus & 0x8U) != 0U) {
+        __asm volatile ("csrsi 0x800, 0x8" : : : "memory");
+    }
+}
+#else
+//非 RISC-V 主机环境（仅供 PC 侧联合仿真测试编译，目标固件不会走这条分支）：
+//  实现由测试桩提供，用于验证"嵌套关中断不被破坏"。
+uint32_t config_hal_test_irq_save(void);
+void     config_hal_test_irq_restore(uint32_t mstatus);
+#define flash_irq_save()      config_hal_test_irq_save()
+#define flash_irq_restore(m)  config_hal_test_irq_restore(m)
+#endif
+
+
 //擦除扇区
 //  4KB 扇区擦除是一次不可分割的硬件操作，只能整段保护；
 //  这段窗口通常是毫秒级，也是本路径上仅剩的最长一段关中断。
 bool config_hal_erase_sector(uint32_t sector_addr){
-    __disable_irq();
+    uint32_t mstatus = flash_irq_save();
     FLASH_Status status = FLASH_ROM_ERASE(sector_addr, CONFIG_FLASH_SECTOR_SIZE);
-    __enable_irq();
+    flash_irq_restore(mstatus);
 
     return (status == FLASH_COMPLETE);
 }
@@ -51,11 +86,11 @@ bool config_hal_write(uint32_t addr, const uint8_t *data, uint32_t len){
     for (uint32_t done = 0; done < len; done += CONFIG_FLASH_PAGE_SIZE) {
         //单页原子窗口：一页约 1~2ms，远小于 TIM2 的 65.536ms 溢出周期，
         //不会丢 tick；页间放开中断让 USB 与系统节拍得到响应。
-        __disable_irq();
+        uint32_t mstatus = flash_irq_save();
         FLASH_Status status = FLASH_ROM_WRITE(addr + done,
                                              (uint32_t *)(const void *)(src + done),
                                              CONFIG_FLASH_PAGE_SIZE);
-        __enable_irq();
+        flash_irq_restore(mstatus);
 
         if (status != FLASH_COMPLETE) return false;
     }
@@ -65,6 +100,8 @@ bool config_hal_write(uint32_t addr, const uint8_t *data, uint32_t len){
 
 //读取数据
 void config_hal_read(uint32_t addr, uint8_t *buf, uint32_t len){
+    if (buf == NULL || len == 0U) return;
+
     const uint8_t *src = (const uint8_t *)addr;
     for (uint32_t i = 0; i < len; i++){
         buf[i] = src[i];
