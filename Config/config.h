@@ -32,6 +32,10 @@ typedef struct{
 } JoystickCalibConfig;
 
 //手柄设置
+//  死区上限：百分比，与 Driver/joystick/joystick.c 的 DEADZONE_PERCENT_MAX 保持一致。
+//  该值同时被 joystick_map_axis() 在运行时钳位、被 validate_gamepad_settings() 在写入前拒绝。
+#define CONFIG_DEADZONE_MAX 50
+
 typedef struct{
     uint16_t deadzone;
 } GamepadSettings;
@@ -54,6 +58,12 @@ typedef struct{
 // 配置组描述符
 //--------------------------------------------------------------------+
 
+//配置组数值合法性校验回调
+//  data 指向"至少 d->size 字节"的配置组镜像；返回 true 表示数值合法。
+//  实现约束：data 可能指向 MSP 接收缓冲区（非对齐），回调内部必须先用
+//  局部结构体 memcpy 再访问成员，禁止直接强转读取 uint16_t/uint32_t。
+typedef bool (*ConfigValidator)(const void *data);
+
 typedef struct{
     uint16_t id;
     uint8_t  version;
@@ -62,6 +72,7 @@ typedef struct{
     void     *ram;
     const void *default_data;
     const char *name;
+    ConfigValidator validate;   // NULL = 该组不做数值范围校验
 } ConfigDesc;
 
 //--------------------------------------------------------------------+
@@ -73,8 +84,8 @@ typedef struct{
 //     - 理论上限 = (254 - 1) / 3 = 84 组
 //   取 64 组：单帧状态查询 (1 + 64*3 = 193 字节) 可一次容纳全部配置组，
 //   无需分包；同时给未来收窄载荷或增加字段留出余量。
-//   内存代价：每多一组，注册表增加 sizeof(ConfigDesc) + sizeof(bool) = 21 字节，
-//   16 → 64 组共增加 1008 字节（约 1KB），对 32KB RAM 可接受。
+//   内存代价：每多一组，注册表增加 sizeof(ConfigDesc) + sizeof(bool)
+//   （当前 24 + 1 = 25 字节/组）。
 //--------------------------------------------------------------------+
 #define CONFIG_MAX_GROUPS 64
 
@@ -129,6 +140,12 @@ void* config_get_mutable(uint16_t id);
 
 //标记某个配置组已修改
 void config_mark_dirty(uint16_t id);
+
+//校验某个配置组的数值是否合法
+//  data 必须指向"至少该组 size 字节"的配置组镜像（可以是 Flash/接收缓冲区的非对齐地址）。
+//  返回 false 表示：data 为空、id 未注册、或该组挂了校验回调且回调判定非法。
+//  未挂校验回调的配置组一律返回 true。
+bool config_validate(uint16_t id, const void *data);
 
 //获取已经注册的配置组
 uint8_t config_get_count(void);

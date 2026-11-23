@@ -184,6 +184,15 @@ static void msp_handle_config_set(const uint8_t *payload, uint8_t len) {
         return;
     }
 
+    // 数值合法性校验：不合法则直接拒绝，绝不污染 RAM、也不置脏标记，
+    // 主机收到 MSP_STATUS_INVALID_DATA(3)。
+    // 注意 data 指向 msp_rx_buf 内部（可能是奇地址），config_validate() 的
+    // 各回调内部统一"先 memcpy 到局部对齐结构体再读成员"，不存在非对齐加载。
+    if (!config_validate(config_id, data)) {
+        msp_send_error(MSP_CMD_CONFIG_SET, MSP_STATUS_INVALID_DATA);
+        return;
+    }
+
     // 写入 RAM 并标记脏
     void *ram = config_get_mutable(config_id);
     memcpy(ram, data, data_len);

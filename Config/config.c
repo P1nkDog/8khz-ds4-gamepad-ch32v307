@@ -90,6 +90,51 @@ uint32_t config_get_poll_interval_us(void) {
 }
 
 //--------------------------------------------------------------------+
+// 配置组校验回调
+//   共同约定：data 可能指向 MSP 接收缓冲区或 Flash 扇区缓冲（均为非对齐地址），
+//   所以一律先 memcpy 到局部的对齐结构体再读成员，绝不直接强转访问
+//   uint16_t 成员，规避 RISC-V 非对齐加载异常。
+//--------------------------------------------------------------------+
+
+//摇杆校准：每轴必须满足 min < center < max 且 max <= 4095（12bit ADC 满量程）
+//  这条约束是 joystick_map_axis() 的前提：
+//    half_neg = center - min > 0、half_pos = max - center > 0，
+//    denom = half - dz 才会是正数，不会除零、也不会出现负数映射。
+static bool validate_joystick_calib(const void *data){
+    if (data == NULL) return false;
+
+    JoystickCalibConfig c;
+    memcpy(&c, data, sizeof(c));
+
+    for (uint8_t i = 0; i < 4; i++) {
+        if (c.calib[i].min    >= c.calib[i].center) return false;
+        if (c.calib[i].center >= c.calib[i].max)    return false;
+        if (c.calib[i].max    >  4095U)             return false;
+    }
+    return true;
+}
+
+//手柄设置：死区百分比不得超过 CONFIG_DEADZONE_MAX
+static bool validate_gamepad_settings(const void *data){
+    if (data == NULL) return false;
+
+    GamepadSettings s;
+    memcpy(&s, data, sizeof(s));
+
+    return (s.deadzone <= CONFIG_DEADZONE_MAX);
+}
+
+//回报率：档位必须落在枚举尾部之内，否则 bInterval 计算会越界
+static bool validate_polling_rate(const void *data){
+    if (data == NULL) return false;
+
+    PollingRateConfig p;
+    memcpy(&p, data, sizeof(p));
+
+    return (p.level <= (uint8_t)POLL_RATE_8000);
+}
+
+//--------------------------------------------------------------------+
 // 注册表
 //--------------------------------------------------------------------+
 static struct {
@@ -106,8 +151,10 @@ static struct {
 // ram: RAM 中的变量地址
 // def: 默认值地址
 // name: 名称（调试用）
+// validate: 数值合法性校验回调（NULL = 不做范围校验）
 static void config_register(uint16_t id, uint8_t version, uint16_t size,
-                            void *ram, const void *def, const char *name){
+                            void *ram, const void *def, const char *name,
+                            ConfigValidator validate){
     if (registry.count >= CONFIG_MAX_GROUPS) return;
 
     ConfigDesc *d = &registry.descs[registry.count];
@@ -117,6 +164,7 @@ static void config_register(uint16_t id, uint8_t version, uint16_t size,
     d->ram = ram;
     d->default_data = def;
     d->name = name;
+    d->validate = validate;
     registry.dirty[registry.count] = false;
 
     memcpy(ram, def, size);
@@ -185,6 +233,20 @@ void config_mark_dirty(uint16_t id){
     if (idx >= 0) registry.dirty[idx] = true;
 }
 
+//校验某个配置组的数值是否合法
+//  data 允许是 MSP 接收缓冲区这类非对齐地址，具体回调内部已做局部拷贝。
+bool config_validate(uint16_t id, const void *data){
+    if (data == NULL) return false;
+
+    ConfigDesc *d = find_desc(id);
+    if (d == NULL) return false;
+
+    // 未挂校验回调 = 该组不做数值范围校验
+    if (d->validate == NULL) return true;
+
+    return d->validate(data);
+}
+
 //获取已经注册的配置组
 uint8_t config_get_count(void){
     return registry.count;
@@ -239,8 +301,16 @@ static void load_sector(uint32_t addr){
         ConfigDesc *d = find_desc(rec->type);
         if (d && rec->version == d->version){
             uint16_t data_len = rec->length - sizeof(ConfigRecord);
-            uint16_t take = data_len < d->size ? data_len : d->size;
-            memcpy(d->ram, rec->data, take);
+
+            //两道门槛才允许覆盖 RAM：
+            //  1) 记录长度必须够（旧代码用 min() 做部分拷贝，会把结构体填成
+            //     "前半新、后半旧"的混合态，这里改为长度不足直接不认这条记录）；
+            //  2) 内容必须通过该组的合法性校验（防止 Flash 被写坏 / 老固件留下的
+            //     越界值把运行期打挂）。
+            // 任一不满足则跳过，RAM 保留 config_register() 灌入的出厂默认值。
+            if (data_len >= d->size && config_validate(d->id, rec->data)) {
+                memcpy(d->ram, rec->data, d->size);
+            }
         }
         offset += rec->length;
     }
@@ -351,18 +421,41 @@ bool config_save(void){
 // 初始化
 //--------------------------------------------------------------------+
 
+//出厂默认值自检：逐组用各自的校验回调检验 default_data
+//  只在 config_init() 里调一次，成本是 3 次遍历，换取"默认值永不非法"的保证。
+static bool config_validate_defaults(void){
+    for (uint8_t i = 0; i < registry.count; i++) {
+        const ConfigDesc *d = &registry.descs[i];
+        if (d->validate != NULL && !d->validate(d->default_data)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void config_init(void){
     registry.count = 0;
 
     // 注册所有配置组
-    // 参数：编号, 版本, 大小, RAM地址, 默认值地址, 名称
+    // 参数：编号, 版本, 大小, RAM地址, 默认值地址, 名称, 校验回调
     config_register(CONFIG_ID_JOYSTICK_CALIB, 1, sizeof(JoystickCalibConfig), 
-                    &g_joystickCalib, &joystickCalibDefault, "joystick_calib");
+                    &g_joystickCalib, &joystickCalibDefault, "joystick_calib",
+                    validate_joystick_calib);
     config_register(CONFIG_ID_GAMEPAD_SETTINGS, 1, sizeof(GamepadSettings), 
-                    &g_gamepadSettings, &gamepadSettingsDefault, "gamepad_settings");
+                    &g_gamepadSettings, &gamepadSettingsDefault, "gamepad_settings",
+                    validate_gamepad_settings);
     config_register(CONFIG_ID_POLLING_RATE, 1, sizeof(PollingRateConfig),
-                    &g_pollingrate, &pollingRateDefault, "polling_rate");
-    
+                    &g_pollingrate, &pollingRateDefault, "polling_rate",
+                    validate_polling_rate);
+
+    // 出厂默认值自检：默认值是所有回退路径的终点，必须 100% 通过自己的校验回调。
+    // 不通过说明"校验规则"与"默认常量"不一致，属于开发期缺陷——此时停在死循环里，
+    // 比带着非法参数继续跑更容易定位（不引 assert()/abort()，避免把 newlib 的
+    // 格式化输出链进来）。
+    if (!config_validate_defaults()) {
+        for (;;) { __asm volatile ("nop"); }
+    }
+
     //从config加载
     bool a_ok = validate_sector(CONFIG_FLASH_SECTOR_A_ADDR);
     bool b_ok = validate_sector(CONFIG_FLASH_SECTOR_B_ADDR);
