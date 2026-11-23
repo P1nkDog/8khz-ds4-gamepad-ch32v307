@@ -14,6 +14,22 @@
 
 
 //--------------------------------------------------------------------+
+// 编译期地址边界校验
+//   - A 必须远高于代码段（预留至少 64KB 固件空间）
+//   - B 的扇区尾不得越过 256KB 物理 Flash 上界 0x08040000
+//   - 两个扇区都要按 4KB 对齐（FLASH_ROM_ERASE/WRITE 的硬性要求）
+//--------------------------------------------------------------------+
+_Static_assert(CONFIG_FLASH_SECTOR_A_ADDR >= 0x08010000U,
+               "配置扇区 A 地址过低，可能与代码段冲突");
+_Static_assert(CONFIG_FLASH_SECTOR_B_ADDR + CONFIG_FLASH_SECTOR_SIZE <= 0x08040000U,
+               "配置扇区 B 的尾部超出 256KB 物理 Flash 边界");
+_Static_assert((CONFIG_FLASH_SECTOR_A_ADDR % CONFIG_FLASH_SECTOR_SIZE) == 0,
+               "配置扇区 A 未按 4KB 扇区对齐");
+_Static_assert((CONFIG_FLASH_SECTOR_B_ADDR % CONFIG_FLASH_SECTOR_SIZE) == 0,
+               "配置扇区 B 未按 4KB 扇区对齐");
+
+
+//--------------------------------------------------------------------+
 // 配置组实例
 //--------------------------------------------------------------------+
 JoystickCalibConfig g_joystickCalib;
@@ -77,7 +93,6 @@ static struct {
     uint8_t count; // 已注册数量
     ConfigDesc descs[CONFIG_MAX_GROUPS]; // 描述符数组
     bool dirty[CONFIG_MAX_GROUPS]; // 脏标记（true = 需要保存）
-    uint32_t active_sector; // 当前活动扇区地址
 } registry;
 
 
@@ -319,8 +334,7 @@ bool config_save(void){
         return false;
     }
 
-    //更新状态：A 始终为主读扇区
-    registry.active_sector = CONFIG_FLASH_SECTOR_A_ADDR;
+    //保存成功：清除全部脏标记
     for(int i = 0; i < registry.count; i++)
     {
         registry.dirty[i] =false; 
@@ -351,12 +365,9 @@ void config_init(void){
     bool b_ok = validate_sector(CONFIG_FLASH_SECTOR_B_ADDR);
    
     if(a_ok){
-        registry.active_sector = CONFIG_FLASH_SECTOR_A_ADDR;
         load_sector(CONFIG_FLASH_SECTOR_A_ADDR);
     } else if (b_ok) {
-        registry.active_sector = CONFIG_FLASH_SECTOR_B_ADDR;
         load_sector(CONFIG_FLASH_SECTOR_B_ADDR);
-    }else {
-        registry.active_sector = CONFIG_FLASH_SECTOR_A_ADDR;
     }
+    // 两个扇区都无效时不加载，RAM 保持 config_register() 灌入的默认值
 }
