@@ -15,6 +15,16 @@
 #include "ch32v30x.h"
 
 //--------------------------------------------------------------------+
+// 编译期帧容量校验
+//   MSP_CMD_CONFIG_STATUS 的响应是 [count:1B] + N * [id:1B][size:2B]，
+//   每组固定 3 字节。此处锁死"全部配置组能装进单帧"，避免日后把
+//   CONFIG_MAX_GROUPS 调大后，响应在运行期悄悄被截断/越界。
+//   当前：1 + 64*3 = 193 <= 254，通过。
+//--------------------------------------------------------------------+
+_Static_assert((1U + (uint32_t)CONFIG_MAX_GROUPS * 3U) <= MSP_PAYLOAD_MAX,
+               "CONFIG_MAX_GROUPS exceeds single MSP_CMD_CONFIG_STATUS frame capacity");
+
+//--------------------------------------------------------------------+
 // 状态机变量
 //--------------------------------------------------------------------+
 static MspState  msp_state;
@@ -134,6 +144,13 @@ static void msp_handle_config_get(const uint8_t *payload, uint8_t len) {
         return;
     }
 
+    // 单帧载荷上限保护：响应为 [id:1B][version:1B][data:size]，头部占 2 字节。
+    // 超过 252 字节的配置组无法用一帧回传，直接报错，避免下面 memcpy 溢出 resp[]。
+    if (desc->size > (MSP_PAYLOAD_MAX - 2U)) {
+        msp_send_error(MSP_CMD_CONFIG_GET, MSP_STATUS_INVALID_DATA);
+        return;
+    }
+
     // 响应格式：[config_id, version, data...]
     uint8_t resp[MSP_PAYLOAD_MAX];
     uint8_t pos = 0;
@@ -206,16 +223,26 @@ static void msp_handle_config_reset(const uint8_t *payload, uint8_t len) {
 static void msp_handle_config_status(void) {
     uint8_t count = config_get_count();
     uint8_t resp[MSP_PAYLOAD_MAX];
-    uint8_t pos = 0;
+    uint8_t pos = 1;      // resp[0] 预留给"实际写入的组数"，循环内同步回填
+    uint8_t written = 0;
 
-    resp[pos++] = count;
+    resp[0] = 0;
 
     for (uint8_t i = 0; i < count; i++) {
         const ConfigDesc *desc = config_get_desc_by_index(i);
         if (desc == NULL) break;
+
+        // 单帧载荷边界保护：每组固定写 3 字节，写之前先确认这一组放得下，
+        // 放不下就整体报错返回，绝不让 pos 越过 MSP_PAYLOAD_MAX 写爆 resp[]。
+        if ((uint16_t)pos + 3U > MSP_PAYLOAD_MAX) {
+            msp_send_error(MSP_CMD_CONFIG_STATUS, MSP_STATUS_ERROR);
+            return;
+        }
+
         resp[pos++] = (uint8_t)desc->id;
         resp[pos++] = (uint8_t)(desc->size & 0xFF);
         resp[pos++] = (uint8_t)(desc->size >> 8);
+        resp[0] = ++written;    // 计数与响应体同步，且不会多于实际条目
     }
 
     msp_send_reply(MSP_CMD_CONFIG_STATUS, resp, pos);
