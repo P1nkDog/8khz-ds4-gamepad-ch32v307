@@ -461,6 +461,76 @@ static void msp_handle_input_snapshot(void){
 
 
 //--------------------------------------------------------------------+
+// 命令处理：多配置（全局硬件层 + 4 套独立配置）
+//--------------------------------------------------------------------+
+
+//0x1C 响应长度：3 + 4 × 32 = 131 字节，必须能装进单帧
+_Static_assert((3U + (uint32_t)CONFIG_PROFILE_NAME_MAX * CONFIG_PROFILE_COUNT) <= MSP_PAYLOAD_MAX,
+               "MSP_CMD_PROFILE_GET response exceeds single MSP frame capacity");
+
+//处理 MSP_CMD_PROFILE_GET：返回激活配置号 / 总套数 / 盲切开关 / 4 套配置名
+//  布局（全部为裸字节，无字节序问题）：
+//    [0]        active_profile   当前激活配置 0..3
+//    [1]        profile_count    固定 CONFIG_PROFILE_COUNT(4)
+//    [2]        shortcut_enable  手柄快捷键盲切总开关 0/1
+//    [3..34]    name0            "配置 1" 或用户自定义名（UTF-8，'\0' 结尾）
+//    [35..66]   name1
+//    [67..98]   name2
+//    [99..130]  name3
+//  未激活槽位的名字由 config_get_profile_name() 轻量扫描各自扇区得到，
+//  不会为了让上位机看到名字而把别套配置加载进 RAM（当前工作集不受影响）。
+static void msp_handle_profile_get(const uint8_t *payload, uint8_t len){
+    (void)payload;
+
+    //空载荷请求：带载荷说明上位机与固件的协议版本不匹配，直接拒绝
+    if (len != 0U) {
+        msp_send_error(MSP_CMD_PROFILE_GET, MSP_STATUS_INVALID_DATA);
+        return;
+    }
+
+    uint8_t resp[3U + (CONFIG_PROFILE_NAME_MAX * CONFIG_PROFILE_COUNT)];
+    uint8_t pos = 0;
+
+    resp[pos++] = config_get_active_profile();
+    resp[pos++] = (uint8_t)CONFIG_PROFILE_COUNT;
+    resp[pos++] = config_is_shortcut_switch_enabled() ? 1U : 0U;
+
+    //4 套名称依次铺满 32 字节定长区（config_get_profile_name 已保证 '\0' 结尾）
+    for (uint8_t i = 0; i < (uint8_t)CONFIG_PROFILE_COUNT; i++) {
+        config_get_profile_name(i, (char *)&resp[pos]);
+        pos = (uint8_t)(pos + CONFIG_PROFILE_NAME_MAX);
+    }
+
+    msp_send_reply(MSP_CMD_PROFILE_GET, resp, pos);
+}
+
+//处理 MSP_CMD_PROFILE_SWITCH：切换到 payload[0] 指定的配置槽位
+//  切换 = 在同一批 RAM 上重放目标槽位的默认值并加载其扇区，不重启、不断开 USB；
+//  persist_global = true 会把新的激活号写入全局层 A/B 扇区（掉电记忆）。
+//  注意：切换前请先发 CONFIG_SAVE（0x12）保存当前配置的改动——config_switch_profile()
+//  不会自动落盘当前套的未保存修改（见 Config/config.c 的接口说明）。
+static void msp_handle_profile_switch(const uint8_t *payload, uint8_t len){
+    if (len != 1U) {
+        msp_send_error(MSP_CMD_PROFILE_SWITCH, MSP_STATUS_INVALID_DATA);
+        return;
+    }
+
+    if (payload[0] >= (uint8_t)CONFIG_PROFILE_COUNT) {
+        msp_send_error(MSP_CMD_PROFILE_SWITCH, MSP_STATUS_INVALID_ID);
+        return;
+    }
+
+    bool ok = config_switch_profile(payload[0], true);
+
+    uint8_t resp[2];
+    resp[0] = config_get_active_profile();
+    resp[1] = ok ? (uint8_t)MSP_STATUS_OK : (uint8_t)MSP_STATUS_FLASH_ERROR;
+
+    msp_send_reply(MSP_CMD_PROFILE_SWITCH, resp, sizeof(resp));
+}
+
+
+//--------------------------------------------------------------------+
 // 命令分发
 //--------------------------------------------------------------------+
 static void msp_dispatch(uint8_t cmd, const uint8_t *payload, uint8_t len) {
@@ -481,6 +551,8 @@ static void msp_dispatch(uint8_t cmd, const uint8_t *payload, uint8_t len) {
         case MSP_CMD_CALIB_END:     msp_handle_calib_end(); break;
         case MSP_CMD_CALIB_CANCEL:  msp_handle_calib_cancel(); break;
         case MSP_CMD_INPUT_SNAPSHOT: msp_handle_input_snapshot(); break;
+        case MSP_CMD_PROFILE_GET:   msp_handle_profile_get(payload, len); break;
+        case MSP_CMD_PROFILE_SWITCH: msp_handle_profile_switch(payload, len); break;
         default: msp_send_error(cmd, MSP_STATUS_ERROR); break;
     }
 }
