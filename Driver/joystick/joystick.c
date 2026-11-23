@@ -17,14 +17,14 @@
 
 #define JOYSTICK_OUTPUT_MID 2048
 #define JOYSTICK_OUTPUT_MAX 4095
-#define DEADZONE_PERCENT_MAX 50
+#define JOYSTICK_DEADZONE_MAX 2047U
 
 //死区上限必须与 Config/config.h 的 CONFIG_DEADZONE_MAX 严格一致：
-//  DEADZONE_PERCENT_MAX 是 joystick_map_axis() 的运行时钳位上限，
-//  CONFIG_DEADZONE_MAX  是 config_validate() 的写入前拒绝上限。
-//  两个宏一旦分叉，就会出现"校验放行的值被静默钳位"（用户设 60%，实际只生效 50%），
+//  JOYSTICK_DEADZONE_MAX 是 joystick_map_axis() 的运行时钳位上限，
+//  CONFIG_DEADZONE_MAX   是 config_validate() 的写入前拒绝上限。
+//  两个宏一旦分叉，就会出现"校验放行的死区计数被运行层静默钳位"，
 //  或者反向"合法值被拒收"，都属于难以排查的隐性不一致，所以在编译期直接绑定。
-_Static_assert(CONFIG_DEADZONE_MAX == DEADZONE_PERCENT_MAX,
+_Static_assert(CONFIG_DEADZONE_MAX == JOYSTICK_DEADZONE_MAX,
                "deadzone upper bound mismatch between config.h and joystick.c");
 
 //轴编号
@@ -96,39 +96,44 @@ static uint16_t joystick_read_axis(uint8_t axis, const JoystickData *raw){
     return v;
 }
 
-//单轴死区外满量程映射
-static uint16_t joystick_map_axis(uint16_t raw, const JoystickCalibration *calib, uint16_t deadzone_present){
-    if(deadzone_present > DEADZONE_PERCENT_MAX) deadzone_present = DEADZONE_PERCENT_MAX;
+//单轴死区外满量程映射（12-bit 计数死区：deadzone_counts 即死区半径，单位 ADC count）
+static uint16_t joystick_map_axis(uint16_t raw, const JoystickCalibration *calib, uint16_t deadzone_counts){
+    if(deadzone_counts > JOYSTICK_DEADZONE_MAX) deadzone_counts = JOYSTICK_DEADZONE_MAX;
 
     int32_t center = calib->center;
     int32_t min = calib->min;
     int32_t max = calib->max;
     int32_t half_neg = center - min;
     int32_t half_pos = max - center;
-    int32_t dz_neg = half_neg * (int32_t)deadzone_present / 100;
-    int32_t dz_pos = half_pos * (int32_t)deadzone_present / 100;
+    //死区半径直接取计数值，左右两侧对称
+    int32_t dz_neg = (int32_t)deadzone_counts;
+    int32_t dz_pos = (int32_t)deadzone_counts;
 
+    //以下边界比较全部走 int32_t 有符号运算：
+    //  deadzone_counts 可大于 center（例如 center=1200、死区=2047），若沿用
+    //  (uint16_t)(center - dz_neg) 强转，负数会被解释成 64xxx 的大正数，
+    //  死区窗口整体翻转，映射结果反向。
     //死区内
-    if (raw >= (uint16_t)(center - dz_neg) && raw <= (uint16_t)(center + dz_pos)) {
+    if ((int32_t)raw >= (center - dz_neg) && (int32_t)raw <= (center + dz_pos)) {
         return JOYSTICK_OUTPUT_MID;
     }
 
     //死区外负方向
-    if (raw < (uint16_t)(center - dz_neg)) {
+    if ((int32_t)raw < (center - dz_neg)) {
         int32_t denom = half_neg - dz_neg;
         if(denom <= 0) return JOYSTICK_OUTPUT_MID;
-        int32_t out = (int32_t)(raw - min) * JOYSTICK_OUTPUT_MID / denom;
+        int32_t out = ((int32_t)raw - min) * JOYSTICK_OUTPUT_MID / denom;
         if(out > JOYSTICK_OUTPUT_MID -1) out = JOYSTICK_OUTPUT_MID -1;
         if(out < 0) out = 0;
         return (uint16_t)out;
     }
 
     //死区外正方向
-    if (raw > (uint16_t)(center + dz_pos)) 
+    if ((int32_t)raw > (center + dz_pos)) 
     {
         int32_t denom = half_pos - dz_pos;
         if(denom <= 0) return JOYSTICK_OUTPUT_MID;
-        int32_t t = (int32_t)(raw - center - dz_pos) * (JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID) / denom;
+        int32_t t = ((int32_t)raw - center - dz_pos) * (JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID) / denom;
         if(t < 0) t = 0;
         if(t > JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID) t = JOYSTICK_OUTPUT_MAX - JOYSTICK_OUTPUT_MID;
         return (uint16_t)(JOYSTICK_OUTPUT_MID + t);
@@ -327,7 +332,10 @@ void joystick_process(void){
         if (calib_state == CALIB_TRACKING || calib_state == CALIB_CENTER_SAMPLED) {
             out = JOYSTICK_OUTPUT_MID;
         } else {
-            out = joystick_map_axis(v, &calib->calib[a], settings->deadzone);
+            //左摇杆（LX/LY）用 deadzone_left，右摇杆（RX/RY）用 deadzone_right
+            uint16_t dz = (a == AXIS_LX || a == AXIS_LY) ? settings->deadzone_left
+                                                         : settings->deadzone_right;
+            out = joystick_map_axis(v, &calib->calib[a], dz);
         }
         switch (a) {
             case AXIS_LX: joy_out.lx = out; break;

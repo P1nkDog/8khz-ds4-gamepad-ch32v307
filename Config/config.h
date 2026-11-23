@@ -32,12 +32,14 @@ typedef struct{
 } JoystickCalibConfig;
 
 //手柄设置
-//  死区上限：百分比，与 Driver/joystick/joystick.c 的 DEADZONE_PERCENT_MAX 保持一致。
+//  死区上限：12-bit ADC 半量程计数上限（0 ~ 2047），与 Driver/joystick/joystick.c
+//  的 JOYSTICK_DEADZONE_MAX 保持一致。
 //  该值同时被 joystick_map_axis() 在运行时钳位、被 validate_gamepad_settings() 在写入前拒绝。
-#define CONFIG_DEADZONE_MAX 50
+#define CONFIG_DEADZONE_MAX 2047U
 
 typedef struct{
-    uint16_t deadzone;
+    uint16_t deadzone_left;   // 左摇杆死区 (0 ~ 2047, 12-bit ADC count)
+    uint16_t deadzone_right;  // 右摇杆死区 (0 ~ 2047, 12-bit ADC count)
 } GamepadSettings;
 
 //回报率设置

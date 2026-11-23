@@ -58,7 +58,8 @@ static const JoystickCalibConfig joystickCalibDefault = {
 };
 
 static const GamepadSettings gamepadSettingsDefault = {
-    .deadzone = 1,
+    .deadzone_left  = 40,
+    .deadzone_right = 40,
 };
 
 static const PollingRateConfig pollingRateDefault = {
@@ -114,14 +115,15 @@ static bool validate_joystick_calib(const void *data){
     return true;
 }
 
-//手柄设置：死区百分比不得超过 CONFIG_DEADZONE_MAX
+//手柄设置：左右摇杆死区计数均不得超过 CONFIG_DEADZONE_MAX
 static bool validate_gamepad_settings(const void *data){
     if (data == NULL) return false;
 
     GamepadSettings s;
     memcpy(&s, data, sizeof(s));
 
-    return (s.deadzone <= CONFIG_DEADZONE_MAX);
+    return (s.deadzone_left  <= CONFIG_DEADZONE_MAX) &&
+           (s.deadzone_right <= CONFIG_DEADZONE_MAX);
 }
 
 //回报率：档位必须落在枚举尾部之内，否则 bInterval 计算会越界
@@ -502,7 +504,10 @@ void config_init(void){
     config_register(CONFIG_ID_JOYSTICK_CALIB, 1, sizeof(JoystickCalibConfig), 
                     &g_joystickCalib, &joystickCalibDefault, "joystick_calib",
                     validate_joystick_calib);
-    config_register(CONFIG_ID_GAMEPAD_SETTINGS, 1, sizeof(GamepadSettings), 
+    // 组版本递增到 2：死区字段由"单字段百分比"改为"左右独立 12-bit 计数"，
+    // 旧 Flash 里 version=1 的记录会在 load_sector() 的 rec->version == d->version
+    // 判断处被整条跳过，RAM 回落到新的出厂默认值（宁可重置也不误读）。
+    config_register(CONFIG_ID_GAMEPAD_SETTINGS, 2, sizeof(GamepadSettings), 
                     &g_gamepadSettings, &gamepadSettingsDefault, "gamepad_settings",
                     validate_gamepad_settings);
     config_register(CONFIG_ID_POLLING_RATE, 1, sizeof(PollingRateConfig),
