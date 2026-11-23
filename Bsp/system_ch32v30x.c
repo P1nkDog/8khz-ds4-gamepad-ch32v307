@@ -728,9 +728,13 @@ static void SetSysClockTo144_HSE(void)
   {
     /* HCLK = SYSCLK */
     RCC->CFGR0 |= (uint32_t)RCC_HPRE_DIV1;
-    /* PCLK2 = HCLK */
-    RCC->CFGR0 |= (uint32_t)RCC_PPRE2_DIV1;
-    /* PCLK1 = HCLK */
+    /* PCLK2 = HCLK/2 = 72MHz
+       不取 144MHz 的原因：ADC 时钟只能从 PCLK2 做 /2..//8 分频（CFGR0.ADCPRE 仅 2 位），
+       PCLK2=144MHz 时最低只能到 18MHz，超出 CH32V307 fADC ≤ 14MHz 的手册上限 28%，
+       会牺牲有效位数与通道隔离度。PCLK2=72MHz 时 ADC = 72/8 = 9MHz，严格合规。
+       本项目 APB2 上只挂了 GPIO/ADC/USART1（USART1 未使用），降频无功能代价。 */
+    RCC->CFGR0 |= (uint32_t)RCC_PPRE2_DIV2;
+    /* PCLK1 = HCLK/2 = 72MHz（TIM2 时钟 = 72MHz，us_timer 的 1us 节拍依赖它） */
     RCC->CFGR0 |= (uint32_t)RCC_PPRE1_DIV2;
 
     /*  PLL configuration: PLLCLK = HSE * 18 = 144 MHz */

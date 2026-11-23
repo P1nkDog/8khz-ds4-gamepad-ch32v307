@@ -76,7 +76,9 @@ void board_init(void) {                                    //板级总初始化�
 #endif
 
   // Fullspeed USB
-  uint8_t otg_div;
+  //  otg_div 给默认值：default 分支只剩断言兜底，若断言在某配置下被编译掉，
+  //  读未初始化变量会让 OTG 分频寄存器写入垃圾值。
+  uint8_t otg_div = RCC_OTGFSCLKSource_PLLCLK_Div3;
   switch (SystemCoreClock) {
     case 48000000:  otg_div = RCC_OTGFSCLKSource_PLLCLK_Div1; break;
     case 96000000:  otg_div = RCC_OTGFSCLKSource_PLLCLK_Div2; break;
