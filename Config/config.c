@@ -35,6 +35,10 @@ _Static_assert((CONFIG_FLASH_SECTOR_B_ADDR % CONFIG_FLASH_SECTOR_SIZE) == 0,
 _Static_assert(sizeof(GamepadSettings) == 6,
                "GamepadSettings 布局漂移（应为 6 字节：deadzone_left/right + invert_mask + debounce_ms）");
 
+//按键映射表长度固化：索引直接就是物理位号 0~25，必须是 26 字节且无填充
+_Static_assert(sizeof(ButtonMapConfig) == BUTTON_MAP_COUNT,
+               "ButtonMapConfig 布局漂移（应为 26 字节）");
+
 
 //--------------------------------------------------------------------+
 // 配置组实例
@@ -42,6 +46,7 @@ _Static_assert(sizeof(GamepadSettings) == 6,
 JoystickCalibConfig g_joystickCalib;
 GamepadSettings g_gamepadSettings;
 PollingRateConfig g_pollingrate;
+ButtonMapConfig g_buttonMap;
 
 //--------------------------------------------------------------------+
 // 静态缓冲区
@@ -73,6 +78,42 @@ static const GamepadSettings gamepadSettingsDefault = {
 
 static const PollingRateConfig pollingRateDefault = {
     .level = POLL_RATE_1000,
+};
+
+//出厂按键映射：与 TASK-02 之前 gamepad.c 里写死的映射逐项等价。
+//  下标即物理位号（见 input.h）：0=UP 1=RIGHT 2=DOWN 3=LEFT
+//  4=X(□) 5=A(×) 6=B(○) 7=Y(△) 8=L1 9=R1 10=L2 11=R2
+//  12=L3 13=R3 14=PS 15=SELECT 16=START 17=TOUCHPAD；18~25（BTN1~8）默认禁用。
+//  注意 4~7 的位序（X/A/B/Y）与 DS4 逻辑枚举（A/B/Y/X）不是同序，逐项对齐过。
+const ButtonMapConfig buttonMapDefault = {
+    .map = {
+        [0]  = DS4_BTN_UP,        // PE9  网络UP
+        [1]  = DS4_BTN_RIGHT,     // PE8  网络RIGHT
+        [2]  = DS4_BTN_DOWN,      // PE11 网络DOWN
+        [3]  = DS4_BTN_LEFT,      // PE10 网络LEFT
+        [4]  = DS4_BTN_X,         // PB11 网络X  → □ Square
+        [5]  = DS4_BTN_A,         // PE13 网络A  → × Cross
+        [6]  = DS4_BTN_B,         // PE14 网络B  → ○ Circle
+        [7]  = DS4_BTN_Y,         // PE15 网络Y  → △ Triangle
+        [8]  = DS4_BTN_L1,        // PE7  L1（高电平有效）
+        [9]  = DS4_BTN_R1,        // PB10 R1（高电平有效）
+        [10] = DS4_BTN_L2,        // PB0  L2
+        [11] = DS4_BTN_R2,        // PB1  R2
+        [12] = DS4_BTN_L3,        // PA7  左摇杆按下
+        [13] = DS4_BTN_R3,        // PE1  右摇杆按下
+        [14] = DS4_BTN_PS,        // PE12 PS
+        [15] = DS4_BTN_SELECT,    // PB12 SW2（Share）
+        [16] = DS4_BTN_START,     // PB14 SW4（Options）
+        [17] = DS4_BTN_TOUCHPAD,  // PB13 SW3
+        [18] = DS4_BTN_NONE,      // PD1  BTN1（未映射）
+        [19] = DS4_BTN_NONE,      // PD2  BTN2
+        [20] = DS4_BTN_NONE,      // PD3  BTN3
+        [21] = DS4_BTN_NONE,      // PD4  BTN4
+        [22] = DS4_BTN_NONE,      // PD5  BTN5
+        [23] = DS4_BTN_NONE,      // PD6  BTN6
+        [24] = DS4_BTN_NONE,      // PD7  BTN7
+        [25] = DS4_BTN_NONE,      // PB3  BTN8
+    }
 };
 
 //--------------------------------------------------------------------+
@@ -145,6 +186,21 @@ static bool validate_polling_rate(const void *data){
     memcpy(&p, data, sizeof(p));
 
     return (p.level <= (uint8_t)POLL_RATE_8000);
+}
+
+//按键映射：每一项必须是合法的 Ds4LogicalButton（0=禁用，1~18=功能）
+//  越界项会让 gamepad.c 的 (1UL << target) 移位越界（target > 31 是未定义行为），
+//  因此写入前必须逐项拒绝，而不是运行期再钳位。
+static bool validate_button_map(const void *data){
+    if (data == NULL) return false;
+
+    ButtonMapConfig m;
+    memcpy(&m, data, sizeof(m));
+
+    for (uint8_t i = 0; i < BUTTON_MAP_COUNT; i++) {
+        if (m.map[i] > (uint8_t)DS4_BTN_MAX) return false;
+    }
+    return true;
 }
 
 //--------------------------------------------------------------------+
@@ -524,6 +580,10 @@ void config_init(void){
     config_register(CONFIG_ID_POLLING_RATE, 1, sizeof(PollingRateConfig),
                     &g_pollingrate, &pollingRateDefault, "polling_rate",
                     validate_polling_rate);
+
+    config_register(CONFIG_ID_BUTTON_MAP, 1, sizeof(ButtonMapConfig),
+                    &g_buttonMap, &buttonMapDefault, "button_map",
+                    validate_button_map);
 
     // 出厂默认值自检：默认值是所有回退路径的终点，必须 100% 通过自己的校验回调。
     // 不通过说明"校验规则"与"默认常量"不一致，属于开发期缺陷——此时停在死循环里，

@@ -20,6 +20,7 @@ enum{
     CONFIG_ID_JOYSTICK_CALIB   = 1,
     CONFIG_ID_GAMEPAD_SETTINGS = 2,
     CONFIG_ID_POLLING_RATE     = 3,
+    CONFIG_ID_BUTTON_MAP       = 4,
 };
 
 //--------------------------------------------------------------------+
@@ -61,6 +62,45 @@ typedef struct{
     uint8_t  invert_mask;     // 轴向反转位掩码: bit0=LX, bit1=LY, bit2=RX, bit3=RY
     uint8_t  debounce_ms;     // 按键消抖时间 (0 ~ 50 ms, 0 = 关闭消抖直通)
 } GamepadSettings;
+
+//--------------------------------------------------------------------+
+// 按键重映射：物理输入位（Driver/input/input.h 的 INPUT_MASK_*）→ DS4 逻辑功能
+//   map[] 的下标就是物理位号（0~25），值是该物理键要触发的 DS4 逻辑功能。
+//   位序必须与 input.h 严格对应：
+//     0=UP 1=RIGHT 2=DOWN 3=LEFT 4=X(□) 5=A(×) 6=B(○) 7=Y(△)
+//     8=L1 9=R1 10=L2 11=R2 12=L3 13=R3 14=PS 15=SELECT 16=START 17=TOUCHPAD
+//     18~25=BTN1~BTN8（扩展键）
+//   多对一允许（两个物理键映射到同一功能，按"或"叠加）；
+//   0 表示禁用该物理键。
+//--------------------------------------------------------------------+
+#define BUTTON_MAP_COUNT 26U
+
+typedef enum {
+    DS4_BTN_NONE     = 0,   // 未映射 / 禁用
+    DS4_BTN_UP       = 1,
+    DS4_BTN_RIGHT    = 2,
+    DS4_BTN_DOWN     = 3,
+    DS4_BTN_LEFT     = 4,
+    DS4_BTN_A        = 5,   // Cross (×)
+    DS4_BTN_B        = 6,   // Circle (○)
+    DS4_BTN_Y        = 7,   // Triangle (△)
+    DS4_BTN_X        = 8,   // Square (□)
+    DS4_BTN_L1       = 9,
+    DS4_BTN_R1       = 10,
+    DS4_BTN_L2       = 11,
+    DS4_BTN_R2       = 12,
+    DS4_BTN_L3       = 13,
+    DS4_BTN_R3       = 14,
+    DS4_BTN_PS       = 15,
+    DS4_BTN_SELECT   = 16,  // Share
+    DS4_BTN_START    = 17,  // Options
+    DS4_BTN_TOUCHPAD = 18,  // Touchpad Click
+    DS4_BTN_MAX      = 18
+} Ds4LogicalButton;
+
+typedef struct {
+    uint8_t map[BUTTON_MAP_COUNT]; // 索引 0~25 对应物理按键 bit0~25，值为 Ds4LogicalButton
+} ButtonMapConfig;
 
 //回报率设置
 typedef enum{
@@ -188,6 +228,10 @@ uint32_t config_get_poll_interval_us(void);
 extern JoystickCalibConfig g_joystickCalib;
 extern GamepadSettings g_gamepadSettings;
 extern PollingRateConfig g_pollingrate;
+extern ButtonMapConfig g_buttonMap;
+
+//出厂默认映射表：gamepad.c 在配置组不可用时用它回落，保证"配置异常也不会没按键"
+extern const ButtonMapConfig buttonMapDefault;
 
 
 #endif //CONFIG_H
