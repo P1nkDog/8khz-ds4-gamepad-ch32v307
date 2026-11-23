@@ -185,14 +185,22 @@ SECTIONS
 
 
 /* ---------------------------------------------------------------- */
-/* Link-time guard: the firmware image must NOT grow into Flash       */
-/* config sector A.                                                   */
-/*   CONFIG_FLASH_SECTOR_A_ADDR = 0x0803E000; this script uses        */
-/*   ORIGIN = 0, so the matching link-time address is 0x0003E000.     */
+/* Link-time guard: the firmware image must NOT grow into the Flash   */
+/* config area (5 groups of A/B sector pairs, 40KB in total).         */
+/*   CONFIG_GLOBAL_SECTOR_A_ADDR = 0x08036000 is the first sector of  */
+/*   that area; this script uses ORIGIN = 0, so the matching          */
+/*   link-time address is 0x00036000.                                 */
 /*   _data_lma is the Flash load address of .data and SIZEOF(.data)   */
 /*   is its length, so their sum is the end of the firmware image     */
-/*   in Flash (currently 0x000069B4). If the image ever reaches the   */
-/*   config sector the link fails here, instead of silently erasing   */
+/*   in Flash (currently 0x00007484). If the image ever reaches the   */
+/*   config area the link fails here, instead of silently erasing     */
 /*   code at run time when config is saved.                           */
+/*                                                                    */
+/*   Config area layout (see Config/config_hal.h):                    */
+/*     0x08036000 / 0x08037000   global layer                         */
+/*     0x08038000 / 0x08039000   profile 1                            */
+/*     0x0803A000 / 0x0803B000   profile 2                            */
+/*     0x0803C000 / 0x0803D000   profile 3                            */
+/*     0x0803E000 / 0x0803F000   profile 4                            */
 /* ---------------------------------------------------------------- */
-ASSERT((_data_lma + SIZEOF(.data)) <= 0x0003E000, "Error: Firmware image overlaps Flash config sector A (0x0803E000)");
+ASSERT((_data_lma + SIZEOF(.data)) <= 0x00036000, "Error: Firmware image overlaps Flash config area (0x08036000)");
