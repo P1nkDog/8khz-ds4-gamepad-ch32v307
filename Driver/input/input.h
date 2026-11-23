@@ -47,14 +47,16 @@ typedef struct{
 #define INPUT_MASK_L2        (1U << 10)   // PB0  网络L2
 #define INPUT_MASK_R2        (1U << 11)   // PB1  网络R2
 // 摇杆按下
-#define INPUT_MASK_L3        (1U << 12)   // PA7  JS2按键（左摇杆）
-#define INPUT_MASK_R3        (1U << 13)   // PE1  JS1按键（右摇杆）
+#define INPUT_MASK_L3        (1U << 12)   // PA7  JS2按键（左摇杆）低电平有效
+#define INPUT_MASK_R3        (1U << 13)   // PE1  JS1按键（右摇杆）低电平有效
 // 系统键
 #define INPUT_MASK_PS        (1U << 14)   // PE12 网络PS
 #define INPUT_MASK_SELECT    (1U << 15)   // PB12 SW2
 #define INPUT_MASK_START     (1U << 16)   // PB14 SW4
 #define INPUT_MASK_TOUCHPAD  (1U << 17)   // PB13 SW3
-// 扩展按键（暂不映射到DS4报告，保留读取）
+// 扩展按键 BTN1~BTN8
+//   当前仅扫描并进入按键位图，**未映射至 DS4 报告**（gamepad.c 不消费这些位）。
+//   v0.2.0 主板上部分脚位未引出，映射关系待后续硬件版本确定后再启用。
 #define INPUT_MASK_BTN1      (1U << 18)   // PD1
 #define INPUT_MASK_BTN2      (1U << 19)   // PD2
 #define INPUT_MASK_BTN3      (1U << 20)   // PD3
@@ -62,7 +64,7 @@ typedef struct{
 #define INPUT_MASK_BTN5      (1U << 22)   // PD5
 #define INPUT_MASK_BTN6      (1U << 23)   // PD6
 #define INPUT_MASK_BTN7      (1U << 24)   // PD7
-#define INPUT_MASK_BTN8      (1U << 25)   // PB3
+#define INPUT_MASK_BTN8      (1U << 25)   // PB3（JTAG 已释放，SWD 保留）
 
 
 //--------------------------------------------------------------------+

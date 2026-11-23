@@ -12,6 +12,11 @@
 // 摇杆校准值
 static int16_t adc_calibrattion_val;
 
+// 按键消抖状态：最近 4 帧原始位图 + 最终输出的稳定态
+static uint32_t btn_hist[4];
+static uint8_t  btn_hist_idx;
+static uint32_t btn_stable;
+
 //--------------------------------------------------------------------+
 // ADC初始化
 //--------------------------------------------------------------------+
@@ -23,10 +28,12 @@ static void adc_function_init(void)
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE );
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE );
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE );
-    // 注意：本库 RCC_ADCCLKConfig() 只支持 /2、/4、/6、/8（CFGR0.ADCPRE 仅 2 位），
-    // 没有 Div16；PCLK2=144MHz 时最低只能到 144/8=18MHz，高于手册 fADC 上限 14MHz。
-    // 真要压到 ≤14MHz 只能把 APB2 再分频（system_ch32v30x.c，改 RCC_PCLK2Config(RCC_HCLK_Div2)
-    // → PCLK2=72MHz、ADC=9MHz），这不在本文件职责内，故此处保持 Div8 并留注释。
+    // ADC 时钟 = PCLK2 / 8。Bsp/system_ch32v30x.c 的 SetSysClockTo144_HSE() 里
+    // PCLK2 已设为 HCLK/2 = 72MHz，因此 ADC = 72/8 = 9MHz，落在 CH32V307
+    // 数据手册 fADC ≤ 14MHz 的规格内。
+    // （本库 RCC_ADCCLKConfig() 只支持 /2、/4、/6、/8，CFGR0.ADCPRE 仅 2 位，没有 Div16。
+    //   旧配置 PCLK2=144MHz 时最低只能到 18MHz，超规格 28%，会牺牲有效位数与通道隔离度。
+    //   若日后把 PCLK2 改回 144MHz，必须同步修改这段说明。）
     RCC_ADCCLKConfig(RCC_PCLK2_Div8);
 
     // PA5/PA6 = 右摇杆 X/Y（ADC5/ADC6）
@@ -64,11 +71,33 @@ static void adc_function_init(void)
 //--------------------------------------------------------------------+
 // ADC读取原始值
 //--------------------------------------------------------------------+
+
+//ADC 各通道最后一次有效转换结果（超时兜底用），按通道号索引
+static uint16_t adc_last_valid[16];
+
+//单次转换的等待圈数上限
+//  84 个 ADC 周期（71.5 采样 + 12.5 转换）@9MHz ≈ 9.3us，对应 144MHz 内核约 1340 周期；
+//  轮询循环每圈约 6 周期，正常情况几十圈就出结果。取 10000 圈（约 400us）
+//  留出 40 倍余量，同时保证"ADC 无响应"时不会把整机拖死。
+#define ADC_EOC_TIMEOUT_LOOPS 10000u
+
 static uint16_t adc_read_raw(uint8_t channel){
     ADC_RegularChannelConfig(ADC1,channel,1,ADC_SampleTime_71Cycles5);
     ADC_SoftwareStartConvCmd(ADC1,ENABLE);
-    while (!ADC_GetFlagStatus(ADC1,ADC_FLAG_EOC));
-    return ADC_GetConversionValue(ADC1);
+
+    //有界等待：ADC 时钟未使能 / ADC 被意外复位时，无超时的死等会让整个手柄静默挂死
+    //  （USB 还在、但一帧报告都不出，现场极难判断）。超时返回该通道上一次有效值，
+    //  让主循环继续跑下去，上位机还能连上来查出问题。
+    uint32_t guard = ADC_EOC_TIMEOUT_LOOPS;
+    while (!ADC_GetFlagStatus(ADC1,ADC_FLAG_EOC)){
+        if (--guard == 0u){
+            return adc_last_valid[channel & 0x0Fu];
+        }
+    }
+
+    uint16_t value = ADC_GetConversionValue(ADC1);
+    adc_last_valid[channel & 0x0Fu] = value;
+    return value;
 }
 
 //--------------------------------------------------------------------+
@@ -171,43 +200,67 @@ void input_read_joystick(JoystickData *data){
 //读取标准按键
 void input_read_buttons(uint32_t *buttons){
 
-    *buttons = 0; 
+    uint32_t raw = 0;
 
     // 方向键
-    if(gpio_read_pin(GPIOE, GPIO_Pin_9)  == 0) *buttons |= INPUT_MASK_UP;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_8)  == 0) *buttons |= INPUT_MASK_RIGHT;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_11) == 0) *buttons |= INPUT_MASK_DOWN;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_10) == 0) *buttons |= INPUT_MASK_LEFT;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_9)  == 0) raw |= INPUT_MASK_UP;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_8)  == 0) raw |= INPUT_MASK_RIGHT;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_11) == 0) raw |= INPUT_MASK_DOWN;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_10) == 0) raw |= INPUT_MASK_LEFT;
 
     // 面键 A/B/X/Y
-    if(gpio_read_pin(GPIOE, GPIO_Pin_13) == 0) *buttons |= INPUT_MASK_BTN_A;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_14) == 0) *buttons |= INPUT_MASK_BTN_B;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_15) == 0) *buttons |= INPUT_MASK_BTN_Y;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_11) == 0) *buttons |= INPUT_MASK_BTN_X;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_13) == 0) raw |= INPUT_MASK_BTN_A;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_14) == 0) raw |= INPUT_MASK_BTN_B;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_15) == 0) raw |= INPUT_MASK_BTN_Y;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_11) == 0) raw |= INPUT_MASK_BTN_X;
 
     // 肩键：L1/R1 高电平有效（内部下拉），L2/R2 低电平有效（内部上拉）
-    if(gpio_read_pin(GPIOE, GPIO_Pin_7)  == Bit_SET) *buttons |= INPUT_MASK_L1;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_10) == Bit_SET) *buttons |= INPUT_MASK_R1;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_0)  == 0) *buttons |= INPUT_MASK_L2;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_1)  == 0) *buttons |= INPUT_MASK_R2;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_7)  == Bit_SET) raw |= INPUT_MASK_L1;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_10) == Bit_SET) raw |= INPUT_MASK_R1;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_0)  == 0) raw |= INPUT_MASK_L2;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_1)  == 0) raw |= INPUT_MASK_R2;
 
     // 摇杆按下 L3/R3
-    if(gpio_read_pin(GPIOA, GPIO_Pin_7)  == 0) *buttons |= INPUT_MASK_L3;
-    if(gpio_read_pin(GPIOE, GPIO_Pin_1)  == 0) *buttons |= INPUT_MASK_R3;
+    if(gpio_read_pin(GPIOA, GPIO_Pin_7)  == 0) raw |= INPUT_MASK_L3;
+    if(gpio_read_pin(GPIOE, GPIO_Pin_1)  == 0) raw |= INPUT_MASK_R3;
 
     // PS / Select / Start / Touchpad
-    if(gpio_read_pin(GPIOE, GPIO_Pin_12) == 0) *buttons |= INPUT_MASK_PS;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_12) == 0) *buttons |= INPUT_MASK_SELECT;   // SW2
-    if(gpio_read_pin(GPIOB, GPIO_Pin_14) == 0) *buttons |= INPUT_MASK_START;    // SW4
-    if(gpio_read_pin(GPIOB, GPIO_Pin_13) == 0) *buttons |= INPUT_MASK_TOUCHPAD; // SW3
+    if(gpio_read_pin(GPIOE, GPIO_Pin_12) == 0) raw |= INPUT_MASK_PS;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_12) == 0) raw |= INPUT_MASK_SELECT;   // SW2
+    if(gpio_read_pin(GPIOB, GPIO_Pin_14) == 0) raw |= INPUT_MASK_START;    // SW4
+    if(gpio_read_pin(GPIOB, GPIO_Pin_13) == 0) raw |= INPUT_MASK_TOUCHPAD; // SW3
 
-    // 扩展按键 BTN1~BTN8
-    if(gpio_read_pin(GPIOD, GPIO_Pin_1) == 0) *buttons |= INPUT_MASK_BTN1;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_2) == 0) *buttons |= INPUT_MASK_BTN2;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_3) == 0) *buttons |= INPUT_MASK_BTN3;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_4) == 0) *buttons |= INPUT_MASK_BTN4;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_5) == 0) *buttons |= INPUT_MASK_BTN5;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_6) == 0) *buttons |= INPUT_MASK_BTN6;
-    if(gpio_read_pin(GPIOD, GPIO_Pin_7) == 0) *buttons |= INPUT_MASK_BTN7;
-    if(gpio_read_pin(GPIOB, GPIO_Pin_3) == 0) *buttons |= INPUT_MASK_BTN8;
+    // 扩展按键 BTN1~BTN8（v0.2.0 主板保留，当前扫描但未映射到 DS4 报告）
+    //   PD1~PD7 = BTN1~BTN7，PB3 = BTN8（PB3 原为 JTDO，已在 button_gpio_init()
+    //   里通过 AFIO_PCFR1.SWJ_CFG = JTAGDISABLE 释放为普通 GPIO，SWD 不受影响）。
+    if(gpio_read_pin(GPIOD, GPIO_Pin_1) == 0) raw |= INPUT_MASK_BTN1;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_2) == 0) raw |= INPUT_MASK_BTN2;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_3) == 0) raw |= INPUT_MASK_BTN3;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_4) == 0) raw |= INPUT_MASK_BTN4;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_5) == 0) raw |= INPUT_MASK_BTN5;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_6) == 0) raw |= INPUT_MASK_BTN6;
+    if(gpio_read_pin(GPIOD, GPIO_Pin_7) == 0) raw |= INPUT_MASK_BTN7;
+    if(gpio_read_pin(GPIOB, GPIO_Pin_3) == 0) raw |= INPUT_MASK_BTN8;
+
+    //--------------------------------------------------------------------+
+    // 4 帧一致性消抖（零阻塞）
+    //--------------------------------------------------------------------+
+    //  机械触点抖动 1~5ms，8kHz 下每 125us 采一次，会把抖动如实上报 8~40 次；
+    //  主机侧虽然有去抖，但菜单单次确认、格斗游戏的帧精确输入仍会受影响。
+    //  这里保留最近 4 帧的原始位图，4 帧完全一致才把稳定态输出出去：
+    //    - 零阻塞：不延时、不等待，只比较 4 个 32bit 变量（约 10 个周期）；
+    //    - 8kHz 等效稳定窗 = 4 x 125us = 0.5ms；1kHz = 4ms；250Hz = 16ms。
+    //      稳定窗随帧周期等比放大是"帧计数消抖"的固有代价（低回报率档位延迟换来的
+    //      是更彻底的抖动滤除）；若需要恒定时间窗，应改成基于 micros() 的时间戳版本。
+    //    - 中间态（4 帧不一致）保持上一次的稳定值，不会产生中间抖动。
+    btn_hist[btn_hist_idx] = raw;
+    btn_hist_idx = (uint8_t)((btn_hist_idx + 1u) & 0x03u);
+
+    if (btn_hist[0] == btn_hist[1] &&
+        btn_hist[1] == btn_hist[2] &&
+        btn_hist[2] == btn_hist[3]) {
+        btn_stable = raw;
+    }
+
+    *buttons = btn_stable;
 }
