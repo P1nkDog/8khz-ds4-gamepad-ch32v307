@@ -8,10 +8,12 @@
 
 #include <string.h>
 #include "tusb.h"
+#include "debug.h"
 #include "msp_protocol.h"
 #include "msp_handler.h"
 #include "config.h"
 #include "joystick.h"
+#include "us_timer.h"
 #include "ch32v30x.h"
 
 //--------------------------------------------------------------------+
@@ -33,6 +35,11 @@ static uint8_t   msp_rx_cmd;        // 命令码
 static uint8_t   msp_rx_buf[MSP_FRAME_BUF_SIZE]; // payload 缓冲区
 static uint8_t   msp_rx_offset;     // 已接收的 payload 字节数
 static uint8_t   msp_rx_crc;        // 累计 CRC
+static uint32_t  msp_last_byte_us;  // 最后一个字节的到达时刻（半包超时判据）
+
+//字节间超时阈值：50ms 远大于任何合法帧的传输时间（260 字节约 23ms @115200 都够），
+//又远小于人能感知的"卡住"，超过它就把非 IDLE 状态强制复位。
+#define MSP_RX_TIMEOUT_US 50000u
 
 //--------------------------------------------------------------------+
 // 发送缓冲区
@@ -43,7 +50,26 @@ static uint8_t   msp_tx_buf[MSP_FRAME_BUF_SIZE];
 // 初始化
 //--------------------------------------------------------------------+
 void msp_init(void) {
-    msp_state = MSP_STATE_IDLE;
+    msp_state        = MSP_STATE_IDLE;
+    msp_rx_offset    = 0;
+    msp_rx_size      = 0;
+    msp_last_byte_us = micros();
+}
+
+//--------------------------------------------------------------------+
+// 半包超时复位（由 cdc_process 每轮调用）
+//--------------------------------------------------------------------+
+//  逐字节状态机只按 size 推进，没有时间维度：主机发半个帧后掉线、页面刷新、
+//  或 USB 重枚举，状态就会停在 HEADER_*/PAYLOAD/CRC 里继续"吞"后续字节，
+//  直到凑满 size 才回 IDLE。现场表现是"重连后第一条命令必然超时，重发才成功"。
+//  这里补上字节间超时：只要超过 MSP_RX_TIMEOUT_US 没有新字节，就丢弃半包。
+void msp_poll(void) {
+    if (msp_state == MSP_STATE_IDLE) return;
+
+    if ((micros() - msp_last_byte_us) > MSP_RX_TIMEOUT_US) {
+        msp_state     = MSP_STATE_IDLE;
+        msp_rx_offset = 0;
+    }
 }
 
 //--------------------------------------------------------------------+
@@ -81,11 +107,32 @@ static void msp_send_reply(uint8_t cmd, const uint8_t *data, uint8_t len) {
     // crc
     msp_tx_buf[pos++] = crc;
 
-    tud_cdc_write(msp_tx_buf, pos);
-    tud_cdc_write_flush();
+    //发送：tud_cdc_write() 返回"实际入队字节数"，TX FIFO 满时会少写甚至写 0。
+    //  直接丢弃返回值会在线上留下半截帧 —— 上位机按 size 等字节会永久卡住，
+    //  比"整帧没发出去"更难排查（后者只会超时重发）。
+    //  处理方式：先等 FIFO 腾出整帧空间（CDC 模式没有实时约束，上限约 20ms，
+    //  正常路径下 512B FIFO 装 260B 帧一次就够，这个等待不会真的发生）；
+    //  再按返回值最多重试 3 轮，每轮之间跑一次 tud_task() 让 USB 栈推进。
+    for (uint8_t wait = 0; wait < 20u && tud_cdc_write_available() < pos; wait++) {
+        tud_task();
+        Delay_Ms(1);
+    }
+
+    uint16_t sent = 0;
+    for (uint8_t retry = 0; retry < 3u; retry++) {
+        sent = (uint16_t)(sent + (uint16_t)tud_cdc_write(msp_tx_buf + sent,
+                                                         (uint32_t)(pos - sent)));
+        tud_cdc_write_flush();
+        if (sent >= pos) return;
+        tud_task();
+    }
+    //三轮仍写不完：放弃本次响应。半截帧已在线上，上位机会按超时重发整条命令。
 }
 
-//发送错误响应：$ M ! [size] [cmd] [status] [crc]
+//发送错误响应：$ M > [1] [cmd] [status] [crc]
+//  注意：本实现不发送标准 MSP 的 '$ M !' 方向字节，错误帧与成功帧共用 '>'，
+//  由 payload 首字节的状态码（MSP_STATUS_*）区分。上位机解析时必须先看状态码，
+//  不能只看方向字节。（MSP_DIR_ERROR 因此保留未用，仅作为协议文档常量。）
 static void msp_send_error(uint8_t cmd, uint8_t status) {
     msp_send_reply(cmd, &status, 1);
 }
@@ -122,9 +169,19 @@ static void msp_handle_reboot(const uint8_t *payload, uint8_t len) {
     uint8_t status = MSP_STATUS_OK;
     msp_send_reply(MSP_CMD_REBOOT, &status, 1);
 
-    // 等待 USB 发送完成
-    tud_task();
-    for (volatile uint32_t i = 0; i < 100000; i++) {}
+    // 等 CDC 发送缓冲真正排空，而不是空转一个与主频绑定的常数循环：
+    //  判据从"过了多久"换成"还有没有字节没发出去"，复位前不会再出现
+    //  "ACK 还没上总线设备就重启了"。上限约 20ms，主机在枚举切换 / URB 调度
+    //  抖动时偶发 >10ms 的 IN 令牌空档也不会丢 ACK；期间持续跑 tud_task()
+    //  让 USB 栈能推进事件。（旧实现是 for(volatile i...) 空转，时长随主频
+    //  和优化等级漂移，且与真实发送进度无关。）
+    for (uint16_t waited_ms = 0; waited_ms < 20u; waited_ms++) {
+        tud_task();
+        if (tud_cdc_write_available() >= (uint32_t)CFG_TUD_CDC_TX_BUFSIZE) {
+            break;      // FIFO 已空，数据都交给主机了
+        }
+        Delay_Ms(1);
+    }
 
     // 系统复位
     NVIC_SystemReset();
@@ -287,16 +344,26 @@ static void msp_handle_joystick_raw(void){
 }
 
 //处理 MSP_CMD_CALIB_START
+//  状态机拒绝越阶调用时会返回 false（例如上一次校准还没结束），
+//  这里必须把拒绝如实回报给上位机，否则用户会以为已经进入校准。
 static void msp_handle_calib_start(void){
-    joystick_calib_start();
-    uint8_t status = MSP_STATUS_OK;
+    uint8_t status = joystick_calib_start() ? MSP_STATUS_OK : MSP_STATUS_ERROR;
     msp_send_reply(MSP_CMD_CALIB_START, &status, 1);
 }
 
 //处理 MSP_CMD_CALIB_SAMPLE：采样中心，返回4轴center
 static void msp_handle_calib_sample(void){
-    joystick_calib_sample_center();
+    if (!joystick_calib_sample_center()) {
+        msp_send_error(MSP_CMD_CALIB_SAMPLE, MSP_STATUS_ERROR);
+        return;
+    }
+
     const JoystickCalibConfig *calib = (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
+    if (calib == NULL) {
+        msp_send_error(MSP_CMD_CALIB_SAMPLE, MSP_STATUS_ERROR);
+        return;
+    }
+
     uint8_t resp[9];
     resp[0] = 4;   //轴数量
     for(uint8_t i = 0; i < 4; i++){
@@ -308,8 +375,7 @@ static void msp_handle_calib_sample(void){
 
 //处理 MSP_CMD_CALIB_TRACK：开始跟踪min/max
 static void msp_handle_calib_track(void){
-    joystick_calib_track_start();
-    uint8_t status = MSP_STATUS_OK;
+    uint8_t status = joystick_calib_track_start() ? MSP_STATUS_OK : MSP_STATUS_ERROR;
     msp_send_reply(MSP_CMD_CALIB_TRACK, &status, 1);
 }
 
@@ -334,9 +400,9 @@ static void msp_handle_calib_end(void){
 }
 
 //处理 MSP_CMD_CALIB_CANCEL：放弃校准
+//  已在 IDLE 时"取消"是无效操作，回 ERROR 让上位机知道当前并没有进行中的校准。
 static void msp_handle_calib_cancel(void){
-    joystick_calib_cancel();
-    uint8_t status = MSP_STATUS_OK;
+    uint8_t status = joystick_calib_cancel() ? MSP_STATUS_OK : MSP_STATUS_ERROR;
     msp_send_reply(MSP_CMD_CALIB_CANCEL, &status, 1);
 }
 
@@ -369,6 +435,9 @@ static void msp_dispatch(uint8_t cmd, const uint8_t *payload, uint8_t len) {
 // 状态机：逐字节处理
 //--------------------------------------------------------------------+
 void msp_process_byte(uint8_t byte) {
+    //每收到一个字节就刷新"最后活动时刻"，msp_poll() 靠它判定半包超时
+    msp_last_byte_us = micros();
+
     switch (msp_state) {
         case MSP_STATE_IDLE:
             if (byte == MSP_SYNC1) {

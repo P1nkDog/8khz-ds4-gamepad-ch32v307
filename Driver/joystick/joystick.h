@@ -46,20 +46,20 @@ const JoystickOutput* joystick_get_output(void);
 //获取摇杆取反后原始值（供msp实时显示）
 const uint16_t* joystick_get_raw(void);
 
-//进入校准模式
-void joystick_calib_start(void);
+//进入校准模式（false = 状态不符，已在校准中）
+bool joystick_calib_start(void);
 
-//采样中心值
-void joystick_calib_sample_center(void);
+//采样中心值（false = 状态不符，未先调用 start）
+bool joystick_calib_sample_center(void);
 
-//开始跟踪摇杆最大最小值
-void joystick_calib_track_start(void);
+//开始跟踪摇杆最大最小值（false = 状态不符，未先采样中心）
+bool joystick_calib_track_start(void);
 
 //结束跟踪并保存，返回是否成功
 bool joystick_calib_track_end(void);
 
-//取消校准
-void joystick_calib_cancel(void);
+//取消校准（false = 本来就不在校准中）
+bool joystick_calib_cancel(void);
 
 
 

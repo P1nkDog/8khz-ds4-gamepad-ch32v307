@@ -143,21 +143,24 @@ static uint16_t joystick_map_axis(uint16_t raw, const JoystickCalibration *calib
 
 //进入校准模式
 //  只有从 IDLE 进入时才抓快照：连续两次 start 不会用"半成品"覆盖掉原始有效备份。
-void joystick_calib_start(void){
-    if (calib_state != CALIB_IDLE) return;
+//  返回值：true = 已进入 CALIB_START；false = 状态不符或配置不可用（调用方据此回报错误）。
+bool joystick_calib_start(void){
+    if (calib_state != CALIB_IDLE) return false;
 
     const JoystickCalibConfig *cur =
         (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
-    if (cur == NULL) return;
+    if (cur == NULL) return false;
 
     memcpy(&calib_backup, cur, sizeof(calib_backup));
     calib_state = CALIB_START;
+    return true;
 }
 
 //采样中心值（16 帧平均）
 //  只接受 CALIB_START / CALIB_CENTER_SAMPLED（后者 = 重采中心）；其余状态直接忽略。
-void joystick_calib_sample_center(void){
-    if (calib_state != CALIB_START && calib_state != CALIB_CENTER_SAMPLED) return;
+//  返回值：true = 已写入新中心；false = 状态不符或配置不可用。
+bool joystick_calib_sample_center(void){
+    if (calib_state != CALIB_START && calib_state != CALIB_CENTER_SAMPLED) return false;
 
     JoystickData raw;
     uint32_t sum[4] = {0, 0, 0, 0};
@@ -171,7 +174,7 @@ void joystick_calib_sample_center(void){
     }
 
     JoystickCalibConfig *calib = (JoystickCalibConfig *)config_get_mutable(CONFIG_ID_JOYSTICK_CALIB);
-    if (calib == NULL) return;
+    if (calib == NULL) return false;
 
     for(uint8_t a = 0; a < 4; a++){
         calib->calib[a].center = (uint16_t)(sum[a] / N);
@@ -179,17 +182,19 @@ void joystick_calib_sample_center(void){
     //此处刻意不置脏：校准尚未完成，不能被任何一次 config_save()（例如上位机
     //中途发 CONFIG_SAVE）顺带写进 Flash。只有 track_end 校验通过才标记并落盘。
     calib_state = CALIB_CENTER_SAMPLED;
+    return true;
 }
 
 //开始跟踪最大最小值
 //  必须先完成中心采样，否则 min/max 没有基准——直接忽略，防止越阶调用把
 //  "未标定"的极值当成有效行程。
-void joystick_calib_track_start(void){
-    if (calib_state != CALIB_CENTER_SAMPLED) return;
+//  返回值：true = 已进入 CALIB_TRACKING；false = 状态不符或配置不可用。
+bool joystick_calib_track_start(void){
+    if (calib_state != CALIB_CENTER_SAMPLED) return false;
 
     const JoystickCalibConfig *calib =
         (const JoystickCalibConfig *)config_get(CONFIG_ID_JOYSTICK_CALIB);
-    if (calib == NULL) return;
+    if (calib == NULL) return false;
 
     for (uint8_t a = 0; a < 4; a++) {
         uint16_t c = calib->calib[a].center;
@@ -210,6 +215,7 @@ void joystick_calib_track_start(void){
         //  下直接输出中点来达成（见该函数）。
     }
     calib_state = CALIB_TRACKING;
+    return true;
 }
 
 //跟踪阶段单轴极值更新（只由 joystick_process 每帧调用）
@@ -268,14 +274,16 @@ bool joystick_calib_track_end(void){
 //取消校准
 //  处于任意非 IDLE 状态都回滚到校准前快照——包括"已采样中心但还没跟踪"这种
 //  半成品，避免新中心留在 RAM 里污染后续映射。
-void joystick_calib_cancel(void){
-    if (calib_state == CALIB_IDLE) return;
+//  返回值：true = 确实做了回滚；false = 本来就在 IDLE（无事可做，上位机可据此判错）。
+bool joystick_calib_cancel(void){
+    if (calib_state == CALIB_IDLE) return false;
 
     JoystickCalibConfig *calib = (JoystickCalibConfig *)config_get_mutable(CONFIG_ID_JOYSTICK_CALIB);
     if (calib != NULL) {
         memcpy(calib, &calib_backup, sizeof(calib_backup));
     }
     calib_state = CALIB_IDLE;
+    return true;
 }
 
 
@@ -309,8 +317,14 @@ void joystick_process(void){
         //  跟踪期间不映射，直接输出中点：此时 min/max 尚未标定完，做映射会把
         //  "只推了一半"当成满量程输出；同时活动配置全程保持上一次的合法校准，
         //  不再出现 min==center==max 的非法中间态（见 joystick_calib_track_start）。
+        //
+        //  CALIB_CENTER_SAMPLED 同样要输出中点：该状态下 center 已被新采样值覆盖，
+        //  而 min/max 还是上一次校准的结果。只要新 center 落在旧 [min,max] 之外
+        //  （旧校准偏差大时会发生），half_pos 变负 → 死区窗口上界低于 center →
+        //  映射退化成"一侧 0..2047、另一侧恒 2048"的半量程中间态。
+        //  采样完成到开始跟踪之间的这段窗口，用户在上位机预览里能直接看到轴跳。
         uint16_t out;
-        if (calib_state == CALIB_TRACKING) {
+        if (calib_state == CALIB_TRACKING || calib_state == CALIB_CENTER_SAMPLED) {
             out = JOYSTICK_OUTPUT_MID;
         } else {
             out = joystick_map_axis(v, &calib->calib[a], settings->deadzone);

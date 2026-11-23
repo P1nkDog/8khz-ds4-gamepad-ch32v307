@@ -20,6 +20,7 @@
 #include "tusb.h"
 #include "usb_device.h"
 #include "perf_stat.h"
+#include "msp_handler.h"
 
 
 /* Global typedef */
@@ -43,11 +44,12 @@ int main(void)
     usb_desc_init();
     usb_device_init();
 
-    printf("SystemClk:%d\r\n", SystemCoreClock);
-    printf("ChipID:%08x\r\n", DBGMCU_GetCHIPID());
+    printf("SystemClk:%lu\r\n", (unsigned long)SystemCoreClock);
+    printf("ChipID:%08lx\r\n", (unsigned long)DBGMCU_GetCHIPID());
     printf("Mode: %s\r\n", current_mode == USB_MODE_HID ? "HID" : "CDC");
 
     gamepad_init();
+    msp_init();
 
     PERF_STAT_RESET();
 
