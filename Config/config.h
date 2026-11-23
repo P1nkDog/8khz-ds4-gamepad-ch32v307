@@ -21,7 +21,19 @@ enum{
     CONFIG_ID_GAMEPAD_SETTINGS = 2,
     CONFIG_ID_POLLING_RATE     = 3,
     CONFIG_ID_BUTTON_MAP       = 4,
+    CONFIG_ID_MACRO_BASE       = 5,   // 宏槽位基址：5 ~ 12，共 8 个槽位
 };
+
+//宏槽位编号（CONFIG_ID_MACRO_0 = 5 ~ CONFIG_ID_MACRO_7 = 12）
+#define MACRO_SLOT_COUNT    8U
+#define CONFIG_ID_MACRO_0   (CONFIG_ID_MACRO_BASE + 0U)
+#define CONFIG_ID_MACRO_1   (CONFIG_ID_MACRO_BASE + 1U)
+#define CONFIG_ID_MACRO_2   (CONFIG_ID_MACRO_BASE + 2U)
+#define CONFIG_ID_MACRO_3   (CONFIG_ID_MACRO_BASE + 3U)
+#define CONFIG_ID_MACRO_4   (CONFIG_ID_MACRO_BASE + 4U)
+#define CONFIG_ID_MACRO_5   (CONFIG_ID_MACRO_BASE + 5U)
+#define CONFIG_ID_MACRO_6   (CONFIG_ID_MACRO_BASE + 6U)
+#define CONFIG_ID_MACRO_7   (CONFIG_ID_MACRO_BASE + 7U)
 
 //--------------------------------------------------------------------+
 // 配置组数据结构
@@ -110,6 +122,58 @@ typedef struct {
     //   0 = 禁用；单个位 = 触发一个功能；多个位 = 一个物理键同时触发多个功能（组合键）
     uint32_t mask[BUTTON_MAP_COUNT];
 } ButtonMapConfig;
+
+//--------------------------------------------------------------------+
+// 宏引擎配置（8 槽位 × 236 字节）
+//   一个槽位 = 触发条件（26 路物理键组合 + 长按阈值）+ 执行模式 + 最多 16 步动作。
+//   时间统一以毫秒存储，运行期用 micros() 无符号差值换算成微秒，
+//   天然抗 32 位微秒计数器的 71.58 分钟回绕。
+//--------------------------------------------------------------------+
+#define MACRO_MAX_STEPS      16U
+#define MACRO_HOLD_MS_MAX    10000U
+#define CONFIG_MACRO_VERSION 1U
+
+//触发掩码：只允许 26 路物理按键（bit0 ~ bit25，与 input.h 的 INPUT_MASK_* 一致）
+#define MACRO_TRIGGER_MASK_ALL 0x03FFFFFFUL
+
+//摇杆偏移：相对中点 2048 的有符号偏移，0 = 不干预物理摇杆
+#define MACRO_AXIS_OFFSET_MAX  2047
+#define MACRO_AXIS_OFFSET_MIN  (-2048)
+
+//执行模式（存为 uint8_t）
+typedef enum{
+    MACRO_MODE_ONCE   = 0,   // 单次执行：跑完最后一步自动停止
+    MACRO_MODE_HOLD   = 1,   // 按住循环：触发键松开立即停止
+    MACRO_MODE_TOGGLE = 2,   // 开关切换：再触发一次即关闭
+} MacroPlayMode;
+
+//槽位标志位
+#define MACRO_FLAG_BLOCK_TRIGGER 0x01U   // 触发期间屏蔽触发键的普通重映射输出
+#define MACRO_FLAG_VALID_MASK    0x01U   // 合法标志位全集（其余位必须为 0）
+
+//单步动作
+//  **必须 packed**：不加的话 uint32_t 的 4 字节对齐会把 14 撑成 16，
+//  16 步就是 256 字节、整槽 268 字节，与 236 字节的协议长度不符。
+//  代价是奇偶步的 32 位成员落在非 4 字节对齐地址上，所以访问一律走
+//  GCC 为 packed 成员生成的逐字节序列（不会触发 RISC-V 非对齐异常）。
+typedef struct{
+    uint32_t mask;        // DS4 逻辑按键位掩码 (bit1~bit18, 0 = 本步只做等待/摇杆动作)
+    int16_t  lx;          // 左摇杆 X 相对中点偏移 (-2048 ~ +2047, 0 = 不干预物理摇杆)
+    int16_t  ly;          // 左摇杆 Y 相对中点偏移 (-2048 ~ +2047, 0 = 不干预物理摇杆)
+    int16_t  rx;          // 右摇杆 X 相对中点偏移 (-2048 ~ +2047, 0 = 不干预物理摇杆)
+    int16_t  ry;          // 右摇杆 Y 相对中点偏移 (-2048 ~ +2047, 0 = 不干预物理摇杆)
+    uint16_t duration_ms; // 本步持续时间 (1 ~ 65535 ms)
+} __attribute__((packed)) MacroStep;   // 14 字节
+
+typedef struct{
+    uint32_t  trigger_mask; // 触发物理按键组合位掩码 (26 位, 0 = 未绑定/禁用)
+    uint16_t  hold_ms;      // 长按触发阈值 (0 ~ 10000 ms, 0 = 按下即触发)
+    uint8_t   mode;         // MacroPlayMode (0=ONCE, 1=HOLD, 2=TOGGLE)
+    uint8_t   flags;        // 位标志 (bit0: MACRO_FLAG_BLOCK_TRIGGER)
+    uint8_t   step_count;   // 有效步数 (0 ~ 16)
+    uint8_t   reserved[3];  // 保留对齐字节，必须为 0
+    MacroStep steps[MACRO_MAX_STEPS]; // 16 × 14 = 224 字节
+} MacroSlotConfig;          // 12 + 224 = 236 字节
 
 //回报率设置
 typedef enum{
@@ -238,9 +302,14 @@ extern JoystickCalibConfig g_joystickCalib;
 extern GamepadSettings g_gamepadSettings;
 extern PollingRateConfig g_pollingrate;
 extern ButtonMapConfig g_buttonMap;
+extern MacroSlotConfig g_macroSlots[MACRO_SLOT_COUNT];
 
 //出厂默认映射表：gamepad.c 在配置组不可用时用它回落，保证"配置异常也不会没按键"
 extern const ButtonMapConfig buttonMapDefault;
+
+//宏槽位出厂默认值（8 个槽位共享同一份只读模板：未绑定、未启用、0 步）
+//  gamepad.c 的宏引擎在 config_get() 返回 NULL 时用它兜底判断"未配置"。
+extern const MacroSlotConfig macroSlotDefault;
 
 
 #endif //CONFIG_H

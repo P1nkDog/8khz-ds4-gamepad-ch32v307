@@ -39,6 +39,16 @@ _Static_assert(sizeof(GamepadSettings) == 6,
 _Static_assert(sizeof(ButtonMapConfig) == (BUTTON_MAP_COUNT * sizeof(uint32_t)),
                "ButtonMapConfig 布局漂移（应为 104 字节：26 * uint32_t）");
 
+//宏布局固化：单步 14 字节（packed）、整槽 236 字节。
+//  236 是协议约定值（网页端按此长度解析/序列化），一旦漂移上位机会整片读错；
+//  同时必须 <= MSP_PAYLOAD_MAX - 2 = 252，否则 CONFIG_GET 无法用单帧回传。
+_Static_assert(sizeof(MacroStep) == 14U,
+               "MacroStep 布局漂移（应为 14 字节：mask u32 + lx/ly/rx/ry i16 + duration_ms u16，必须 packed）");
+_Static_assert(sizeof(MacroSlotConfig) == 236U,
+               "MacroSlotConfig 布局漂移（应为 236 字节：12 字节头 + 16 × 14 步）");
+_Static_assert(sizeof(MacroSlotConfig) <= 252U,
+               "MacroSlotConfig 超过单帧 CONFIG_GET 容量（MSP_PAYLOAD_MAX 254 - 头部 2 = 252）");
+
 
 //--------------------------------------------------------------------+
 // 配置组实例
@@ -47,6 +57,7 @@ JoystickCalibConfig g_joystickCalib;
 GamepadSettings g_gamepadSettings;
 PollingRateConfig g_pollingrate;
 ButtonMapConfig g_buttonMap;
+MacroSlotConfig g_macroSlots[MACRO_SLOT_COUNT];
 
 //--------------------------------------------------------------------+
 // 静态缓冲区
@@ -114,6 +125,19 @@ const ButtonMapConfig buttonMapDefault = {
         [24] = 0U,                             // PD7  BTN7
         [25] = 0U,                             // PB3  BTN8
     }
+};
+
+//宏槽位出厂默认：未绑定触发键、0 步、默认打开触发键屏蔽。
+//  flags 默认给 BLOCK_TRIGGER，是为了让"用户配好一条宏就生效"时不会出现
+//  「宏在跑、触发键同时还在出普通按键」的双触发；不想屏蔽时上位机把它清 0 即可。
+const MacroSlotConfig macroSlotDefault = {
+    .trigger_mask = 0U,
+    .hold_ms      = 0U,
+    .mode         = (uint8_t)MACRO_MODE_ONCE,
+    .flags        = MACRO_FLAG_BLOCK_TRIGGER,
+    .step_count   = 0U,
+    .reserved     = { 0U, 0U, 0U },
+    // steps 全部 0（未使用步必须全 0，见 macro_slot_validate 的尾段检查）
 };
 
 //--------------------------------------------------------------------+
@@ -201,6 +225,48 @@ static bool validate_button_map(const void *data){
     for (uint8_t i = 0; i < BUTTON_MAP_COUNT; i++) {
         if ((m.mask[i] & ~DS4_LOGICAL_MASK_ALL) != 0U) return false;
     }
+    return true;
+}
+
+//宏槽位：触发掩码/长按/模式/标志/步数/保留字节全部白名单校验，
+//  并且**未使用的步必须全 0**——否则"删了几步"之后残留的旧动作会留在 Flash 里，
+//  下次把 step_count 调大时那些幽灵动作会突然复活，现场极难排查。
+static bool macro_slot_is_zero(const MacroStep *st){
+    return (st->mask == 0U) && (st->lx == 0) && (st->ly == 0) &&
+           (st->rx == 0) && (st->ry == 0) && (st->duration_ms == 0U);
+}
+
+static bool macro_slot_validate(const void *data){
+    if (data == NULL) return false;
+
+    // 先落到局部对齐结构体：data 可能指向 msp_rx_buf（奇地址）或 Flash 镜像，
+    // 直接强转读 uint32_t 成员会触发 RISC-V 非对齐访问异常。
+    MacroSlotConfig cfg;
+    memcpy(&cfg, data, sizeof(cfg));
+
+    if ((cfg.trigger_mask & ~MACRO_TRIGGER_MASK_ALL) != 0U) return false;
+    if (cfg.hold_ms > MACRO_HOLD_MS_MAX)                    return false;
+    if (cfg.mode > (uint8_t)MACRO_MODE_TOGGLE)              return false;
+    if ((cfg.flags & (uint8_t)~MACRO_FLAG_VALID_MASK) != 0U) return false;
+    if (cfg.step_count > MACRO_MAX_STEPS)                   return false;
+    if ((cfg.reserved[0] | cfg.reserved[1] | cfg.reserved[2]) != 0U) return false;
+
+    for (uint8_t s = 0; s < cfg.step_count; s++) {
+        const MacroStep *st = &cfg.steps[s];
+
+        if ((st->mask & ~DS4_LOGICAL_MASK_ALL) != 0U) return false;
+        if (st->lx < MACRO_AXIS_OFFSET_MIN || st->lx > MACRO_AXIS_OFFSET_MAX) return false;
+        if (st->ly < MACRO_AXIS_OFFSET_MIN || st->ly > MACRO_AXIS_OFFSET_MAX) return false;
+        if (st->rx < MACRO_AXIS_OFFSET_MIN || st->rx > MACRO_AXIS_OFFSET_MAX) return false;
+        if (st->ry < MACRO_AXIS_OFFSET_MIN || st->ry > MACRO_AXIS_OFFSET_MAX) return false;
+        // 时长不能为 0：宏引擎按"到达时长才推进一步"推进，0 会让它原地打转
+        if (st->duration_ms < 1U) return false;
+    }
+
+    for (uint8_t s = cfg.step_count; s < MACRO_MAX_STEPS; s++) {
+        if (!macro_slot_is_zero(&cfg.steps[s])) return false;
+    }
+
     return true;
 }
 
@@ -427,14 +493,16 @@ bool config_save(void){
     memset(sector_buf, 0xFF, sizeof(sector_buf));
     uint32_t offset = 0;
 
-    //写header
+    //写header（count 先占位，循环结束后回填"实际写入的记录数"）
     ConfigHeader header = {
         .magic = CONFIG_MAGIC,
         .version = CONFIG_HEADER_VERSION,
-        .count = registry.count,
+        .count = 0,
     };
     memcpy(sector_buf + offset, &header, sizeof(header));
     offset += sizeof(header);
+
+    uint8_t written = 0;
 
     //写每个配置组的record
     for (int i = 0; i < registry.count; i++) {
@@ -449,6 +517,16 @@ bool config_save(void){
         //  MSP_STATUS_FLASH_ERROR，用户可先恢复合法状态再重发 CONFIG_SAVE。
         if (d->validate != NULL && !d->validate(d->ram)) {
             return false;
+        }
+
+        //空槽位跳过：内容与出厂默认逐字节相同就不落盘。
+        //  动机：8 个宏槽位默认值一模一样（未绑定 / 0 步），若原样写入，
+        //  236B × 8 + 6B 头 × 8 = 1936 字节，会把 4KB 扇区直接吃掉近一半，
+        //  而"没配过的槽位"开机时已由 config_register() 灌入默认值，
+        //  加载时找不到记录同样保持默认——语义完全等价，纯赚 Flash 空间。
+        //  顺序说明：放在合法性校验之后，保证"非法内容"仍然会拦住整次保存。
+        if (d->default_data != NULL && memcmp(d->ram, d->default_data, d->size) == 0) {
+            continue;
         }
 
         ConfigRecord rec = {
@@ -469,7 +547,12 @@ bool config_save(void){
         offset += sizeof(rec);
         memcpy(sector_buf + offset, d->ram, d->size);
         offset += d->size;
+        written++;
     }
+
+    //回填实际写入的记录数：被跳过的空槽位不计入 header.count
+    header.count = written;
+    memcpy(sector_buf, &header, sizeof(header));
     
     //写footer（同样要确认放得下，末 2 字节留给 CRC）
     if (offset + sizeof(ConfigFooter) > CONFIG_FLASH_SECTOR_SIZE - 2) {
@@ -589,6 +672,16 @@ void config_init(void){
     config_register(CONFIG_ID_BUTTON_MAP, 2, sizeof(ButtonMapConfig),
                     &g_buttonMap, &buttonMapDefault, "button_map",
                     validate_button_map);
+
+    // 宏槽位 0~7（id = 5 ~ 12）：8 个槽位共用一个只读默认模板 macroSlotDefault。
+    //  默认内容全部相同（未绑定/0 步），因此 config_save() 里"与默认逐字节相同就跳过"
+    //  的优化会让 8 个空槽位在 Flash 上完全不占空间——只有真正配过的槽位才落盘。
+    for (uint8_t i = 0; i < MACRO_SLOT_COUNT; i++) {
+        config_register((uint16_t)(CONFIG_ID_MACRO_BASE + i),
+                        CONFIG_MACRO_VERSION, sizeof(MacroSlotConfig),
+                        &g_macroSlots[i], &macroSlotDefault, "macro_slot",
+                        macro_slot_validate);
+    }
 
     // 出厂默认值自检：默认值是所有回退路径的终点，必须 100% 通过自己的校验回调。
     // 不通过说明"校验规则"与"默认常量"不一致，属于开发期缺陷——此时停在死循环里，

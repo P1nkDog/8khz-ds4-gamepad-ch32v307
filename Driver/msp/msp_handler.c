@@ -13,6 +13,7 @@
 #include "msp_handler.h"
 #include "config.h"
 #include "joystick.h"
+#include "input.h"
 #include "us_timer.h"
 #include "ch32v30x.h"
 
@@ -408,6 +409,58 @@ static void msp_handle_calib_cancel(void){
 
 
 //--------------------------------------------------------------------+
+// 命令处理：宏录制快照
+//--------------------------------------------------------------------+
+
+//处理 MSP_CMD_INPUT_SNAPSHOT：返回「消抖后按键 + 4 轴摇杆 + 设备时间戳」，固定 16 字节
+//  布局（全部小端）：
+//    [0..3]  u32 buttons  —— input_read_buttons() 的输出，bit0~25 对应 INPUT_MASK_*
+//    [4..5]  u16 lx       —— joystick_get_output()->lx（12-bit，0~4095）
+//    [6..7]  u16 ly
+//    [8..9]  u16 rx
+//    [10..11] u16 ry
+//    [12..15] u32 micros() 低 32 位（主机按差值算真实间隔，回绕安全）
+//  为什么按键必须在这里自己读：
+//    CDC 模式下 main.c 只跑 cdc_process() + joystick_process()，gamepad_process()
+//    不运行，gamepad_get_state() 里的按键是上一次 HID 模式的残留值（上电直接进
+//    CDC 时全 0），拿它录制会录到一堆"什么都没按"。
+//  为什么摇杆不再采样：
+//    CDC 主循环每轮都调用 joystick_process()，joystick_get_output() 已经是本轮
+//    新算的值；再调一次等于白多采 4 个 ADC 通道（约 37µs）并推动校准跟踪状态机。
+static void msp_handle_input_snapshot(void){
+    uint32_t buttons = 0;
+    input_read_buttons(&buttons);
+
+    const JoystickOutput *out = joystick_get_output();
+    const uint32_t ts = micros();
+
+    uint8_t resp[16];
+    uint8_t pos = 0;
+
+    resp[pos++] = (uint8_t)(buttons & 0xFF);
+    resp[pos++] = (uint8_t)((buttons >> 8) & 0xFF);
+    resp[pos++] = (uint8_t)((buttons >> 16) & 0xFF);
+    resp[pos++] = (uint8_t)((buttons >> 24) & 0xFF);
+
+    resp[pos++] = (uint8_t)(out->lx & 0xFF);
+    resp[pos++] = (uint8_t)(out->lx >> 8);
+    resp[pos++] = (uint8_t)(out->ly & 0xFF);
+    resp[pos++] = (uint8_t)(out->ly >> 8);
+    resp[pos++] = (uint8_t)(out->rx & 0xFF);
+    resp[pos++] = (uint8_t)(out->rx >> 8);
+    resp[pos++] = (uint8_t)(out->ry & 0xFF);
+    resp[pos++] = (uint8_t)(out->ry >> 8);
+
+    resp[pos++] = (uint8_t)(ts & 0xFF);
+    resp[pos++] = (uint8_t)((ts >> 8) & 0xFF);
+    resp[pos++] = (uint8_t)((ts >> 16) & 0xFF);
+    resp[pos++] = (uint8_t)((ts >> 24) & 0xFF);
+
+    msp_send_reply(MSP_CMD_INPUT_SNAPSHOT, resp, pos);
+}
+
+
+//--------------------------------------------------------------------+
 // 命令分发
 //--------------------------------------------------------------------+
 static void msp_dispatch(uint8_t cmd, const uint8_t *payload, uint8_t len) {
@@ -427,6 +480,7 @@ static void msp_dispatch(uint8_t cmd, const uint8_t *payload, uint8_t len) {
         case MSP_CMD_CALIB_TRACK:   msp_handle_calib_track(); break;
         case MSP_CMD_CALIB_END:     msp_handle_calib_end(); break;
         case MSP_CMD_CALIB_CANCEL:  msp_handle_calib_cancel(); break;
+        case MSP_CMD_INPUT_SNAPSHOT: msp_handle_input_snapshot(); break;
         default: msp_send_error(cmd, MSP_STATUS_ERROR); break;
     }
 }
