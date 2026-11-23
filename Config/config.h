@@ -12,9 +12,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "joystick.h"
+#include "config_hal.h"   // 五组 A/B 扇区地址（CONFIG_PROFILE_COUNT 等）
 
 //--------------------------------------------------------------------+
 // 配置组编号
+//   1 ~ 12 ：原有组（基础参数 / 按键映射 / 8 组宏）
+//   13     ：全局系统设置（所属层：全局硬件层）
+//   14     ：配置自定义名称（所属层：独立配置层）
 //--------------------------------------------------------------------+
 enum{
     CONFIG_ID_JOYSTICK_CALIB   = 1,
@@ -23,6 +27,17 @@ enum{
     CONFIG_ID_BUTTON_MAP       = 4,
     CONFIG_ID_MACRO_BASE       = 5,   // 宏槽位基址：5 ~ 12，共 8 个槽位
 };
+
+//多配置相关的配置组编号（与旧编号共用同一编号空间，故单列宏而不入枚举）
+#define CONFIG_GROUP_SYSTEM_GLOBAL   13U   // 全局层：激活配置号 + 盲切总开关
+#define CONFIG_GROUP_PROFILE_META    14U   // 独立配置层：配置自定义名称
+
+//新增组的存储版本号（结构不兼容变化时递增）
+#define CONFIG_SYSTEM_GLOBAL_VERSION 1
+#define CONFIG_PROFILE_META_VERSION  1
+
+//配置名长度（UTF-8，含 '\0' 结尾；定长 32 字节整体落盘）
+#define CONFIG_PROFILE_NAME_MAX      32
 
 //宏槽位编号（CONFIG_ID_MACRO_0 = 5 ~ CONFIG_ID_MACRO_7 = 12）
 #define MACRO_SLOT_COUNT    8U
@@ -190,6 +205,26 @@ typedef struct{
 } PollingRateConfig;
 
 //--------------------------------------------------------------------+
+// Group 13：全局系统设置（所属层：全局硬件层）
+//   与"当前用哪一套配置"无关的运行时策略，只序列化进全局层 A/B 扇区，
+//   不随配置切换变化：当前激活配置号 + 手柄快捷键盲切总开关。
+//--------------------------------------------------------------------+
+typedef struct __attribute__((packed)) {
+    uint8_t active_profile;          // 当前激活配置索引 0..3（默认 0）
+    uint8_t shortcut_switch_enable;  // 手柄快捷键盲切总开关 0/1（默认 1 开启）
+    uint8_t reserved[2];             // 保留字节，默认全 0
+} SystemGlobalConfig;                // 4 字节
+
+//--------------------------------------------------------------------+
+// Group 14：配置自定义名称（所属层：独立配置层）
+//   UTF-8，必须含 '\0' 结尾，剩余字节填 0；name[0] 不得为 '\0'。
+//   默认值随"当前激活配置号"动态生成（"配置 1" ~ "配置 4"）。
+//--------------------------------------------------------------------+
+typedef struct __attribute__((packed)) {
+    char name[CONFIG_PROFILE_NAME_MAX]; // UTF-8 配置名称
+} ProfileMetaConfig;                    // 32 字节
+
+//--------------------------------------------------------------------+
 // 配置组描述符
 //--------------------------------------------------------------------+
 
@@ -199,10 +234,21 @@ typedef struct{
 //  局部结构体 memcpy 再访问成员，禁止直接强转读取 uint16_t/uint32_t。
 typedef bool (*ConfigValidator)(const void *data);
 
+//配置组所属层
+//  全局层：与"哪一套配置"无关（摇杆校准 / 回报率 / 全局系统设置），
+//          序列化进 CONFIG_GLOBAL_SECTOR_A/B。
+//  独立配置层：每套配置各有一份（配置名 / 手柄设置 / 按键映射 / 8 组宏），
+//          序列化进当前激活配置对应的 CONFIG_PROFILE_SECTOR_A/B(idx)。
+//  序列化顺序 = 注册顺序在同一层内的先后（见 config.c 的注册顺序）。
+typedef enum{
+    CONFIG_LAYER_GLOBAL  = 0,
+    CONFIG_LAYER_PROFILE = 1,
+} ConfigLayer;
+
 typedef struct{
     uint16_t id;
     uint8_t  version;
-    uint8_t  _pad;
+    uint8_t  layer;             // ConfigLayer：决定该组写入哪一层扇区
     uint16_t size;
     void     *ram;
     const void *default_data;
@@ -296,6 +342,34 @@ const ConfigDesc* config_get_desc_by_index(uint8_t index);
 uint32_t config_get_poll_interval_us(void);
 
 //--------------------------------------------------------------------+
+// 多配置层 api（全局硬件层 + 4 套独立配置层）
+//
+//   RAM 只有一份"当前激活配置"的工作集：切换配置 = 在同一批 RAM 上重放默认值
+//   再覆盖目标扇区内容，因此 config_get(1..14) / config_get_mutable(1..14)
+//   以及 gamepad.c 启动时缓存的 macro_slots[8] 指针永远有效（切换只改内容、
+//   不换地址）。
+//--------------------------------------------------------------------+
+
+//当前激活配置号（0 ~ CONFIG_PROFILE_COUNT-1；越界一律回报 0）
+uint8_t config_get_active_profile(void);
+
+//手柄快捷键盲切总开关（Group 13 的 shortcut_switch_enable）
+bool config_is_shortcut_switch_enabled(void);
+
+//切换到指定配置（profile_idx = 0 ~ 3）
+//  流程：更新激活号 → 独立配置层整体回落为目标槽位默认值（含 "配置 N"）
+//        → 从目标槽位 A/B 扇区加载有效数据（A 优先）→ 清独立层脏标记
+//        → persist_global 为 true 时把激活号同步落盘（只写全局层扇区）
+//  注意：切换不会自动保存"当前配置尚未 config_save() 的改动"——那些改动只存在
+//  于 RAM，会在"回落为目标槽位默认值"这一步被覆盖。上位机应在切换前先 SAVE。
+bool config_switch_profile(uint8_t profile_idx, bool persist_global);
+
+//读取某个槽位的配置名（out_name 必须至少 CONFIG_PROFILE_NAME_MAX 字节）
+//  当前激活槽位直接读 RAM；其它槽位以默认名 "配置 N" 打底，再轻量扫描该槽位
+//  A/B 扇区的 Group 14 记录（用小栈缓冲区，不占用 sector_buf、不改任何 RAM）。
+void config_get_profile_name(uint8_t profile_idx, char out_name[CONFIG_PROFILE_NAME_MAX]);
+
+//--------------------------------------------------------------------+
 // 配置组实例
 //--------------------------------------------------------------------+
 extern JoystickCalibConfig g_joystickCalib;
@@ -303,6 +377,8 @@ extern GamepadSettings g_gamepadSettings;
 extern PollingRateConfig g_pollingrate;
 extern ButtonMapConfig g_buttonMap;
 extern MacroSlotConfig g_macroSlots[MACRO_SLOT_COUNT];
+extern SystemGlobalConfig g_systemGlobal;   // 全局层：激活配置号 + 盲切开关
+extern ProfileMetaConfig  g_profileMeta;    // 当前激活配置的自定义名称
 
 //出厂默认映射表：gamepad.c 在配置组不可用时用它回落，保证"配置异常也不会没按键"
 extern const ButtonMapConfig buttonMapDefault;
