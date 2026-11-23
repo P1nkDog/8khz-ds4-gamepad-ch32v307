@@ -8,7 +8,7 @@
 
 #include "config_hal.h"
 #include "ch32v30x_flash.h"
-#include <string.h>
+#include <stddef.h>
 
 
 
@@ -20,14 +20,18 @@ bool config_hal_erase_sector(uint32_t sector_addr){
 }
 
 //向flash写入数据
+//  直接把调用方的缓冲区交给 FLASH_ROM_WRITE()，不再做整扇区的中间拷贝：
+//  FLASH_ROM_WRITE 内部按 64 word(256B)/页 编程，要求目标地址、源指针、长度
+//  都是 4 字节对齐；非对齐指针强转 uint32_t* 会触发 RISC-V 非对齐访问异常，
+//  长度非 4 倍数还会读出缓冲区尾部之外的数据，因此这里先做严格校验。
 bool config_hal_write(uint32_t addr, const uint8_t *data, uint32_t len){
-    uint32_t aligned_len = (len + 3) & ~3;
+    if (data == NULL || len == 0U) return false;
 
-    static uint32_t write_buf[CONFIG_FLASH_SECTOR_SIZE / 4];
-    memset(write_buf, 0xFF, aligned_len);
-    memcpy(write_buf, data, len);
+    if (((addr & 3U) != 0U) || (((uintptr_t)data & 3U) != 0U) || ((len & 3U) != 0U)) {
+        return false;
+    }
 
-    FLASH_Status status = FLASH_ROM_WRITE(addr, write_buf, aligned_len);
+    FLASH_Status status = FLASH_ROM_WRITE(addr, (uint32_t *)(const void *)data, len);
     return (status == FLASH_COMPLETE);
 }
 

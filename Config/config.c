@@ -38,9 +38,12 @@ PollingRateConfig g_pollingrate;
 
 //--------------------------------------------------------------------+
 // 静态缓冲区
+//   sector_buf 直接作为 FLASH_ROM_WRITE() 的源缓冲区（不再经中间拷贝），
+//   所以必须 4 字节对齐；同时扇区大小也必须是 4 的倍数，否则末尾会残留
+//   不足一个字的尾部、且校验范围与写入长度会对不上。
 //--------------------------------------------------------------------+
-
-static uint8_t sector_buf[CONFIG_FLASH_SECTOR_SIZE];
+_Static_assert((CONFIG_FLASH_SECTOR_SIZE % 4U) == 0U, "sector size must be 4-byte aligned");
+static uint8_t sector_buf[CONFIG_FLASH_SECTOR_SIZE] __attribute__((aligned(4)));
 
 //--------------------------------------------------------------------+
 // 默认值
