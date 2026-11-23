@@ -307,6 +307,103 @@ static void macro_update(uint32_t buttons, MacroFrame *frame){
 }
 
 //--------------------------------------------------------------------+
+// 配置盲切（本板无震动马达，切换只靠按键组合 + Flash 记忆）
+//
+//   Share + △ / □ / ○ / × 长按满 3000ms → 直接切到配置 1 / 2 / 3 / 4。
+//   完全受 Group 13 的 shortcut_switch_enable 控制（关闭时本模块不留任何状态）。
+//
+//   组合键采用**精确匹配**（raw_buttons 必须恰好等于组合值）：这样 "Share + 方向上 + △"
+//   这类混合输入不会被误判，也避免用户一边推十字键一边切配置。
+//   触发后进入锁定，必须等 Share/△/□/○/× 全部松开才解锁，防止长按在几套配置间来回切。
+//
+//   防误触：上电时 shortcut_armed = false，必须先观测到一帧"盲切相关键全松开"的
+//   空闲状态才开始接受组合键计时——否则"上电即长按 Share+△"会在开机 3 秒后立刻切配置。
+//--------------------------------------------------------------------+
+#define PROFILE_SHORTCUT_HOLD_US   3000000UL   // 3000ms
+
+#define PROFILE_SHORTCUT_KEYS_MASK (INPUT_MASK_SELECT | INPUT_MASK_BTN_Y | \
+                                    INPUT_MASK_BTN_X | INPUT_MASK_BTN_B | INPUT_MASK_BTN_A)
+
+static bool     shortcut_armed     = false;  // 已观测到空闲帧，可以开始计时
+static bool     shortcut_locked    = false;  // 已触发，等全部松开
+static uint8_t  shortcut_target    = 0xFF;   // 正在计时的目标槽位（0xFF = 无有效组合）
+static uint32_t shortcut_start_us  = 0U;     // 组合键按下的起始 micros()
+
+//清空宏引擎运行状态（含各槽位的"本轮已触发/蓄力"标志）
+//  切配置后宏槽内容整体换了一套，旧状态必须清零：否则新配置里同名槽位会被残留的
+//  combo_active / fired_this_hold 当成"已经触发过"，表现为宏按不出来。
+static void macro_stop_all(void){
+    for (uint8_t i = 0; i < MACRO_SLOT_COUNT; i++) {
+        macro_combo_active[i]    = false;
+        macro_press_start_us[i]  = 0U;
+        macro_fired_this_hold[i] = false;
+    }
+    macro_reset();
+}
+
+//盲切状态机：每帧调用一次，入参是**消抖后的原始物理按键掩码**
+static void profile_shortcut_update(uint32_t raw_buttons){
+
+    //--- 总开关关闭：连状态一起清掉，重新开启后必须重新观测空闲帧
+    if (!config_is_shortcut_switch_enabled()) {
+        shortcut_armed    = false;
+        shortcut_locked   = false;
+        shortcut_target   = 0xFF;
+        shortcut_start_us = 0U;
+        return;
+    }
+
+    //--- 释放检查：盲切相关键全松开 → 武装 + 解锁
+    //  放在最前面，是为了让"触发后一直按住"的锁定状态能在用户松手的第一帧解除。
+    if ((raw_buttons & (uint32_t)PROFILE_SHORTCUT_KEYS_MASK) == 0U) {
+        shortcut_armed  = true;
+        shortcut_locked = false;
+        shortcut_target = 0xFF;
+        return;
+    }
+
+    //--- 未武装（上电即按住）或已锁定（本轮已切换过）：不计时
+    if (!shortcut_armed || shortcut_locked) return;
+
+    //--- 组合键精确匹配（多一个键都不算）
+    uint8_t matched = 0xFF;
+
+    if (raw_buttons == (uint32_t)(INPUT_MASK_SELECT | INPUT_MASK_BTN_Y))      matched = 0U;   // Share + △ → 配置 1
+    else if (raw_buttons == (uint32_t)(INPUT_MASK_SELECT | INPUT_MASK_BTN_X)) matched = 1U;   // Share + □ → 配置 2
+    else if (raw_buttons == (uint32_t)(INPUT_MASK_SELECT | INPUT_MASK_BTN_B)) matched = 2U;   // Share + ○ → 配置 3
+    else if (raw_buttons == (uint32_t)(INPUT_MASK_SELECT | INPUT_MASK_BTN_A)) matched = 3U;   // Share + × → 配置 4
+
+    if (matched == 0xFF) {
+        //按着 Share 还按了别的键，或在按别的键：本轮计时作废
+        shortcut_target = 0xFF;
+        return;
+    }
+
+    //刚按下或中途换键：重新起计时
+    if (matched != shortcut_target) {
+        shortcut_target   = matched;
+        shortcut_start_us = micros();
+        return;
+    }
+
+    //微秒无符号差值：32 位计数器 71.58 分钟回绕一次也不会误判成"已满 3 秒"
+    if ((uint32_t)(micros() - shortcut_start_us) < PROFILE_SHORTCUT_HOLD_US) return;
+
+    //--- 触发：先锁死本轮，再清宏状态，最后切配置
+    shortcut_locked   = true;
+    shortcut_target   = 0xFF;
+    shortcut_start_us = 0U;
+
+    //宏引擎必须先停：跨配置残留的宏状态会与新槽位的触发条件打架
+    macro_stop_all();
+
+    //已经是目标配置就不碰 Flash（避免一次无意义的双扇区擦写）
+    if (matched != config_get_active_profile()) {
+        (void)config_switch_profile(matched, true);
+    }
+}
+
+//--------------------------------------------------------------------+
 // 公共接口
 //--------------------------------------------------------------------+
 void gamepad_init(){
@@ -325,6 +422,12 @@ void gamepad_init(){
         macro_fired_this_hold[i] = false;
     }
     macro_reset();
+
+    //盲切状态机复位：armed = false，上电必须先观测到"盲切相关键全松开"的空闲帧
+    shortcut_armed    = false;
+    shortcut_locked   = false;
+    shortcut_target   = 0xFF;
+    shortcut_start_us = 0U;
 }
 
 void gamepad_process(){
@@ -334,6 +437,11 @@ void gamepad_process(){
 
     joystick_process();
     input_read_buttons(&btn);
+
+    //配置盲切状态机：用**原始物理按键**判断（不经过按键重映射，否则用户把 Share
+    //  改成别的功能后就再也切不了配置）。放在宏引擎之前：切换成功后同一帧就能
+    //  按新配置的宏表运行，且宏状态已在切换前被清空。
+    profile_shortcut_update(btn);
 
     joy = joystick_get_output();
     state.lx = joy->lx;
