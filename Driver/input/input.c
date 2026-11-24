@@ -10,9 +10,7 @@
 #include "ch32v30x.h"
 #include "config.h"
 #include "us_timer.h"
-
-// 摇杆校准值
-static int16_t adc_calibrattion_val;
+#include "input_adc_dma.h"
 
 //--------------------------------------------------------------------+
 // 按键消抖状态（26 键独立时间窗口）
@@ -32,98 +30,11 @@ static uint32_t btn_stable;                                // 已通过消抖的
 static uint32_t btn_change_us[INPUT_DEBOUNCE_KEY_COUNT];    // 每键原始电平最后变化时刻
 
 //--------------------------------------------------------------------+
-// ADC初始化
+// ADC（已迁移到双 ADC + DMA 模块）
+//  摇杆采样改由 input_adc_dma.c 承担：ADC1 + ADC2 规则同步，TIM3 32kHz 触发，
+//  DMA1_Channel1 32 位循环双 Bank 搬运。这里不再保留单 ADC 轮询路径，
+//  主循环每帧不再为 4 次转换各阻塞约 9.3us（合计 ~37.3us）。
 //--------------------------------------------------------------------+
-static void adc_function_init(void)
-{
-	ADC_InitTypeDef ADC_InitStructure={0};
-	GPIO_InitTypeDef GPIO_InitStructure={0};
-
-	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE );
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE );
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE );
-    // ADC 时钟 = PCLK2 / 8。Bsp/system_ch32v30x.c 的 SetSysClockTo144_HSE() 里
-    // PCLK2 已设为 HCLK/2 = 72MHz，因此 ADC = 72/8 = 9MHz，落在 CH32V307
-    // 数据手册 fADC ≤ 14MHz 的规格内。
-    // （本库 RCC_ADCCLKConfig() 只支持 /2、/4、/6、/8，CFGR0.ADCPRE 仅 2 位，没有 Div16。
-    //   旧配置 PCLK2=144MHz 时最低只能到 18MHz，超规格 28%，会牺牲有效位数与通道隔离度。
-    //   若日后把 PCLK2 改回 144MHz，必须同步修改这段说明。）
-    RCC_ADCCLKConfig(RCC_PCLK2_Div8);
-
-    // PA5/PA6 = 右摇杆 X/Y（ADC5/ADC6）
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_5 | GPIO_Pin_6;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AIN;
-    GPIO_Init(GPIOA, &GPIO_InitStructure);
-
-    // PC4/PC5 = 左摇杆 X/Y（ADC14/ADC15）
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4 | GPIO_Pin_5;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AIN;
-    GPIO_Init(GPIOC, &GPIO_InitStructure);
-
-	ADC_DeInit(ADC1);
-	ADC_InitStructure.ADC_Mode = ADC_Mode_Independent;
-	ADC_InitStructure.ADC_ScanConvMode = DISABLE;
-	ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;
-	ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
-	ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
-	ADC_InitStructure.ADC_NbrOfChannel = 1;
-	ADC_Init(ADC1, &ADC_InitStructure);
-
-	// ADC_DMACmd(ADC1, ENABLE);
-	ADC_Cmd(ADC1, ENABLE);
-
-	ADC_BufferCmd(ADC1, DISABLE);   //disable buffer
-	ADC_ResetCalibration(ADC1);
-	while(ADC_GetResetCalibrationStatus(ADC1));
-	ADC_StartCalibration(ADC1);
-	while(ADC_GetCalibrationStatus(ADC1));
-	adc_calibrattion_val = Get_CalibrationValue(ADC1);	
-	
-}
-
-
-//--------------------------------------------------------------------+
-// ADC读取原始值
-//--------------------------------------------------------------------+
-
-//ADC 各通道最后一次有效转换结果（超时兜底用），按通道号索引
-static uint16_t adc_last_valid[16];
-
-//单次转换的等待圈数上限
-//  84 个 ADC 周期（71.5 采样 + 12.5 转换）@9MHz ≈ 9.3us，对应 144MHz 内核约 1340 周期；
-//  轮询循环每圈约 6 周期，正常情况几十圈就出结果。取 10000 圈（约 400us）
-//  留出 40 倍余量，同时保证"ADC 无响应"时不会把整机拖死。
-#define ADC_EOC_TIMEOUT_LOOPS 10000u
-
-static uint16_t adc_read_raw(uint8_t channel){
-    ADC_RegularChannelConfig(ADC1,channel,1,ADC_SampleTime_71Cycles5);
-    ADC_SoftwareStartConvCmd(ADC1,ENABLE);
-
-    //有界等待：ADC 时钟未使能 / ADC 被意外复位时，无超时的死等会让整个手柄静默挂死
-    //  （USB 还在、但一帧报告都不出，现场极难判断）。超时返回该通道上一次有效值，
-    //  让主循环继续跑下去，上位机还能连上来查出问题。
-    uint32_t guard = ADC_EOC_TIMEOUT_LOOPS;
-    while (!ADC_GetFlagStatus(ADC1,ADC_FLAG_EOC)){
-        if (--guard == 0u){
-            return adc_last_valid[channel & 0x0Fu];
-        }
-    }
-
-    uint16_t value = ADC_GetConversionValue(ADC1);
-    adc_last_valid[channel & 0x0Fu] = value;
-    return value;
-}
-
-//--------------------------------------------------------------------+
-// ADC读取校准值
-//--------------------------------------------------------------------+
-static uint16_t adc_read_calibrated(uint8_t channel){
-    int32_t raw_value = adc_read_raw(channel);
-    int32_t calibrated_value = raw_value + adc_calibrattion_val;
-    if(calibrated_value < 0) calibrated_value = 0;
-    if(calibrated_value > 4095) calibrated_value = 4095;
-    return (uint16_t)calibrated_value;
-}
 
 //--------------------------------------------------------------------+
 // GPIO初始化
@@ -198,8 +109,10 @@ static uint8_t gpio_read_pin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin){
 
 //初始化输入硬件（GPIO，ADC）
 void input_init(void){
-    adc_function_init();
+    //先配数字按键，再配模拟引脚：ADC 模块最后把 PA5/PA6/PC4/PC5 落成 GPIO_Mode_AIN，
+    //保证模拟输入不会被任何上/下拉配置覆盖
     button_gpio_init();
+    input_adc_dma_init();
 
     //消抖状态清零：基准态从"全松开"开始，避免上电瞬间残留脏时间戳
     btn_raw_last = 0;
@@ -212,10 +125,9 @@ void input_init(void){
 
 //读取摇杆
 void input_read_joystick(JoystickData *data){
-    data -> lx = adc_read_calibrated(ADC_Channel_14);   // PC4 左摇杆X
-    data -> ly = adc_read_calibrated(ADC_Channel_15);   // PC5 左摇杆Y
-    data -> rx = adc_read_calibrated(ADC_Channel_5);    // PA5 右摇杆X
-    data -> ry = adc_read_calibrated(ADC_Channel_6);    // PA6 右摇杆Y
+    //直接从双 ADC DMA 的最新已完成 Bank 读取（已含各 ADC 校准偏移与 0~4095 钳位），
+    //不再触发任何转换，也不阻塞等待 EOC
+    input_adc_dma_read(data);
 }
 
 //读取标准按键

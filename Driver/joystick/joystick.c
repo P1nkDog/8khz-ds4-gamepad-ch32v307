@@ -9,6 +9,7 @@
 #include "joystick.h"
 #include "config.h"
 #include "input.h"
+#include "input_adc_dma.h"
 #include <string.h>
 
 //--------------------------------------------------------------------+
@@ -182,8 +183,16 @@ bool joystick_calib_sample_center(void){
     JoystickData raw;
     uint32_t sum[4] = {0, 0, 0, 0};
     const uint8_t N = 16;
+    uint32_t seq;
 
+    //摇杆采样改为双 ADC + DMA 后，input_read_joystick() 读的是"最新已完成 Bank"，
+    //连续调用会拿到同一份数据，16 帧平均会退化成 1 帧。这里按序号等待新样本：
+    //  每次 TIM3 触发写满一个 Bank（2 个 Rank），HT/TC 交替上报，序号 32kHz 递增
+    //  ≈ 31.25us 一个新样本，16 帧约 0.5ms；每次等待带 200us 超时兜底（DMA 未启动 /
+    //  调试器打断时不会把校准挂死，超时后仍用当前值累加）。
+    seq = input_adc_dma_get_sequence();
     for(uint8_t i = 0; i < N; i++){
+        seq = input_adc_dma_wait_next(seq, INPUT_ADC_CALIB_WAIT_TIMEOUT_US);
         input_read_joystick(&raw);
         for(uint8_t a = 0; a < 4; a++){
             sum[a] += joystick_read_axis(a, &raw);
