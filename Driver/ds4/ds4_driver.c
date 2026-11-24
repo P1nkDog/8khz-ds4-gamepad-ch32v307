@@ -30,42 +30,71 @@ _Static_assert(offsetof(PS4Report, miscData)    == 10, "报告布局漂移(vendo
 //--------------------------------------------------------------------+
 // 发送状态（事件驱动，主循环与回调之间共享）
 //--------------------------------------------------------------------+
-static volatile bool     s_ep_free      = true;  // 端点空闲
-static volatile uint32_t s_drop_count   = 0;     // 累计丢帧
-static uint32_t          s_ep_busy_us   = 0;     // 端点开始忙的时刻
-static uint32_t          s_ep_timeout_us = 1000u; // 本次传输的看门狗阈值
+static volatile bool     s_ep_free      = true;   // 应用层"上一帧已完成"信用
+static volatile uint32_t s_drop_count   = 0;      // 累计丢帧（端点忙 / 提交失败）
+static volatile uint32_t s_stall_count  = 0;      // 完成回调迟到次数（诊断用，不计入丢帧）
+static uint32_t          s_ep_busy_us   = 0;      // 端点开始忙的时刻
+static uint32_t          s_ep_timeout_us = 1000u; // 本次传输的看门狗阈值（按档位动态算）
 
 //--------------------------------------------------------------------+
 // 发送状态查询与空闲超时兜底
 //--------------------------------------------------------------------+
 
-//计算本次传输的看门狗阈值
-//  阈值必须跟随实际帧周期：USB 高速端点发送后要等主机下一次 IN 令牌才算完成，
-//  250Hz 档（bInterval=6，帧周期 4ms）的端点在物理上就要忙 4ms。
-//  若沿用固定 1ms 阈值，低回报率档位会把每一帧都误判成"完成回调丢失"，
-//  丢帧计数被刷成噪音（失去 8kHz 调优参考值），并会在同一令牌周期内重复组帧。
-//  取 2 倍帧周期作为容差，下限仍保留 1ms（8kHz/4kHz 档的兜底灵敏度不变）。
+//看门狗倍数与上下限
+//  高速端点发出后要等主机下一次 IN 令牌才算完成，物理上至少忙满一个帧周期
+//  （250Hz→4ms、1kHz→1ms、8kHz→125us）。倍数取 6：既给完成事件在 tud_task
+//  队列里排队留出余量，又不至于让一帧卡死后要等太久才记账。
+//  下限 500us：8kHz 档 6×125us 只有 750us，再往下压会接近"一次 ISR + 一次组帧"
+//  的抖动范围，容易把正常帧误记成迟到；上限 32ms：250Hz 档 6×4ms = 24ms，
+//  封顶是为了防止将来配置更低档位时把阈值拉爆。
+#define DS4_WATCHDOG_PERIOD_MULT   6u
+#define DS4_WATCHDOG_MIN_US        500u
+#define DS4_WATCHDOG_MAX_US        32000u
+
+//计算本次传输的看门狗阈值（跟随当前轮询档位，125us ~ 4000us → 750us ~ 24ms）
 static uint32_t ds4_watchdog_timeout_us(void) {
-    uint32_t period  = config_get_poll_interval_us();   // 125 ~ 4000us
-    uint32_t timeout = period * 2u;
-    return (timeout > 1000u) ? timeout : 1000u;
+    uint32_t period  = config_get_poll_interval_us();
+    uint32_t timeout = period * DS4_WATCHDOG_PERIOD_MULT;
+
+    if (timeout < DS4_WATCHDOG_MIN_US) timeout = DS4_WATCHDOG_MIN_US;
+    if (timeout > DS4_WATCHDOG_MAX_US) timeout = DS4_WATCHDOG_MAX_US;
+    return timeout;
 }
 
-//端点是否可发送：忙超过看门狗阈值视为完成回调丢失，强制解锁
+//端点是否可发送
+//  1) tud_hid_ready() 是唯一权威判据：它内部是 tud_ready()（= tud_mounted() &&
+//     !tud_suspended()）&& ep_in != 0 && !usbd_edpt_busy()。未挂载、总线挂起、
+//     端点仍然忙这三种情况一律"本帧不发"，且**不**计入丢帧——这些状态下压根
+//     没有"本该发出去却被丢掉"的帧。旧实现在挂起时靠看门狗每 1ms 强放一次，
+//     结果每帧都在 usbd_edpt_claim() 上失败，把 s_drop_count 刷成噪音。
+//  2) s_ep_free 是应用层信用，只用来识别"完成回调没回来"这一种异常，不再作为
+//     放行开关：TinyUSB 单缓冲端点忙时强行重入必然 claim 失败。
 bool ds4_ready_to_send(void) {
+    if (!tud_hid_ready()) return false;
+
     if (s_ep_free) return true;
 
+    //硬件端点已经空闲（上一步已确认 !usbd_edpt_busy），但信用还没归还：
+    //  只可能是完成事件被 ClearHalt / 总线复位打断——usbd 清了 BUSY 却没有回调
+    //  tud_hid_report_complete_cb()。这里只把信用补回来并记一次诊断，
+    //  **不在本帧发送**，避免同一令牌周期内重复组帧；下一次调用即恢复正常。
     if ((micros() - s_ep_busy_us) >= s_ep_timeout_us) {
-        s_ep_free = true;
-        s_drop_count++;
-        return true;
+        s_ep_free    = true;
+        s_stall_count++;
+        return false;
     }
+
     return false;
 }
 
-//累计丢帧数
+//累计丢帧数（端点忙 / 提交失败，属于真实丢失）
 uint32_t ds4_get_drop_count(void) {
     return s_drop_count;
+}
+
+//累计"完成回调迟到"次数（诊断用，不计入丢帧）
+uint32_t ds4_get_stall_count(void) {
+    return s_stall_count;
 }
 
 //--------------------------------------------------------------------+

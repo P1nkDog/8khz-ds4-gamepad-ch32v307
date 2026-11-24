@@ -39,14 +39,19 @@ typedef enum
 //    24 byte  - zero padding
 
 
-// 端点是否可发送（内含"2×轮询周期、下限 1ms"的动态超时兜底，防止完成回调丢失导致卡死）
+// 端点是否可发送（唯一判据是 tud_hid_ready()：未挂载 / 挂起 / 端点忙都不发；
+// 完成回调迟到只归还信用并计数，不强行放行本帧）
 bool ds4_ready_to_send(void);
 
 // 主循环处理（参考 PS4Driver::process）
 void ds4_process(const GamepadState *state);
 
-// 累计丢帧数（供调试/MSP上报）
+// 累计丢帧数（端点忙 / 提交失败，供调试/MSP上报）
 uint32_t ds4_get_drop_count(void);
+
+// 累计"完成回调迟到"次数（诊断用：ClearHalt/总线复位打断完成事件时增加的计数，
+// 与丢帧计数分开，避免把端点状态异常混进真实的丢帧统计）
+uint32_t ds4_get_stall_count(void);
 
 // TinyUSB 描述符回调
 // uint8_t const *tud_descriptor_device_cb(void);
