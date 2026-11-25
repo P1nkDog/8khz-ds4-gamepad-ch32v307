@@ -19,6 +19,7 @@
 #include "us_timer.h"
 #include "tusb.h"
 #include "usb_device.h"
+#include "usb_sof_jit.h"
 #include "perf_stat.h"
 #include "msp_handler.h"
 
@@ -60,7 +61,9 @@ int main(void)
         if (current_mode == USB_MODE_HID) {
             // 上报节奏完全由 USB 令牌驱动（bInterval 决定），软件不做节拍；
             // 未挂载时不能组帧，否则 aux 计数会被空转刷爆
-            if (tud_mounted() && ds4_ready_to_send()) {
+            if (tud_mounted() && ds4_ready_to_send() && usb_sof_jit_is_due()) {
+                // 端点已就绪且 JIT 到期：先消费到期标志，再抓样组包
+                usb_sof_jit_consume_due();
                 PERF_STAT_BEGIN();
                 gamepad_process();
                 ds4_process(gamepad_get_state());

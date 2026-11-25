@@ -15,6 +15,8 @@
 #include "board_api.h"
 #include "board.h"
 #include "us_timer.h"
+#include "usb_sof_jit.h"
+#include "portable/wch/ch32_usbhs_reg.h"   // USBHS 中断标志位宏（位于 TinyUSB 子模块内，仅只读引用）
 
 //--------------------------------------------------------------------+
 // 将USB中断事件转发到TinyUSB IRQ处理器
@@ -24,6 +26,30 @@
 
 __attribute__((interrupt)) void USBHS_IRQHandler(void) {
   #if CFG_TUD_WCH_USBIP_USBHS
+  const uint8_t int_flag   = USBHSD->INT_FG;
+  const uint8_t int_status = USBHSD->INT_ST;
+
+  if (int_flag & USBHS_TRANSFER_FLAG) {
+    const uint8_t token  = int_status & MASK_UIS_TOKEN;
+    const uint8_t ep_num = int_status & MASK_UIS_ENDP;
+
+    if (token == USBHS_TOKEN_PID_SOF) {
+      // 拦截设备侧 SOF 脉冲：驱动 JIT 调度器并直接清标志返回，
+      // 不把 SOF 交给 TinyUSB（否则每 125us 往 16 槽事件队列灌一个没有消费者的事件）。
+      usb_sof_jit_on_sof();
+      USBHSD->INT_FG = USBHS_TRANSFER_FLAG;   // 写 1 清零
+      return;
+    }
+
+    tusb_int_handler(BOARD_TUD_RHPORT, true);
+
+    if ((token == USBHS_TOKEN_PID_IN) && (ep_num == 1u)) {
+      // EP1 IN（手柄 HID 上报端点）已被主机 ACK，重锁微帧相位
+      usb_sof_jit_on_ep1_in_complete();
+    }
+    return;
+  }
+
   tusb_int_handler(BOARD_TUD_RHPORT, true);
   #endif
 }
